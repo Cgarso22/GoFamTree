@@ -4,17 +4,20 @@
   --bg:#FBFAF8; --surface:#FFFFFF; --wood:#EFE5D6; --wood-line:#D9C6A8; --line:#E4DDD2;
   --ink:#24211D; --muted:#756D63; --accent:#86602F; --accent-soft:#F5EEE3;
   --ok:#3F6B4A; --danger:#A3402E; --shadow:0 1px 2px rgba(60,45,25,.06),0 4px 14px rgba(60,45,25,.06);
+  --l0:#86602F; --l1:#3D6A8C; --l2:#4E7D52; --l3:#A65A3A; --l4:#7B5C93; --direct:#F3E9D9;
   --f-name:"Literata",Georgia,"Times New Roman",serif;
   --f-ui:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#171512; --surface:#211E1A; --wood:#3A3026; --wood-line:#6B5638; --line:#36312B;
   --ink:#EEE8E0; --muted:#A79E92; --accent:#D6B07E; --accent-soft:#2B241D;
-  --ok:#8FBF98; --danger:#E3907E; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25); color-scheme:dark}}
+  --ok:#8FBF98; --danger:#E3907E; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25); color-scheme:dark;
+  --l0:#D6B07E; --l1:#86B3D6; --l2:#8DBF8F; --l3:#E39A7A; --l4:#B79AD1; --direct:#3A3026}}
 :root[data-theme="dark"]{
   --bg:#171512; --surface:#211E1A; --wood:#3A3026; --wood-line:#6B5638; --line:#36312B;
   --ink:#EEE8E0; --muted:#A79E92; --accent:#D6B07E; --accent-soft:#2B241D;
-  --ok:#8FBF98; --danger:#E3907E; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25); color-scheme:dark}
+  --ok:#8FBF98; --danger:#E3907E; --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25); color-scheme:dark;
+  --l0:#D6B07E; --l1:#86B3D6; --l2:#8DBF8F; --l3:#E39A7A; --l4:#B79AD1; --direct:#3A3026}
 html,body{height:100%}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:14px;display:flex;flex-direction:column;overflow:hidden}
@@ -183,3 +186,25 @@ form.edit .check{display:flex;align-items:center;gap:8px;color:var(--ink);font-s
 /* the line from the centered person to whoever is selected */
 #links path.hl{stroke:var(--accent);stroke-width:3}
 .card.onpath{border-color:var(--accent)}
+
+/* color coding */
+.cm-relation .card.k-direct{background:var(--direct);border-color:var(--wood-line);box-shadow:inset 4px 0 0 var(--l0)}
+.cm-relation .card.k-blood{box-shadow:inset 4px 0 0 var(--wood-line)}
+.cm-relation .card.k-married,.cm-line .card.k-married{border-style:dashed}
+.cm-line .card.ln-0{box-shadow:inset 5px 0 0 var(--l0)}
+.cm-line .card.ln-1{box-shadow:inset 5px 0 0 var(--l1)}.cm-line .card.k-married.ln-1{border-color:var(--l1)}
+.cm-line .card.ln-2{box-shadow:inset 5px 0 0 var(--l2)}.cm-line .card.k-married.ln-2{border-color:var(--l2)}
+.cm-line .card.ln-3{box-shadow:inset 5px 0 0 var(--l3)}.cm-line .card.k-married.ln-3{border-color:var(--l3)}
+.cm-line .card.ln-4{box-shadow:inset 5px 0 0 var(--l4)}.cm-line .card.k-married.ln-4{border-color:var(--l4)}
+.cm-line .card.k-married.ln-0{border-color:var(--l0)}
+.cm-line .card.k-married{box-shadow:none}
+.card.focus{box-shadow:none}
+#legend{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;display:flex;flex-direction:column;gap:5px;font-size:12px;max-width:280px}
+#legend select{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:5px 8px;font-size:12.5px;font-weight:500;margin-bottom:3px}
+.lg-i{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.lg-sw{flex:none;width:18px;height:12px;border-radius:3px;border:1px solid var(--line);background:var(--surface)}
+.lg-sw.sw-direct{background:var(--direct);box-shadow:inset 4px 0 0 var(--l0);border-color:var(--wood-line)}
+.lg-sw.sw-blood{box-shadow:inset 4px 0 0 var(--wood-line)}
+.lg-sw.sw-married{border-style:dashed;background:var(--bg)}
+.lg-sw.sw-l0{box-shadow:inset 5px 0 0 var(--l0)}.lg-sw.sw-l1{box-shadow:inset 5px 0 0 var(--l1)}.lg-sw.sw-l2{box-shadow:inset 5px 0 0 var(--l2)}.lg-sw.sw-l3{box-shadow:inset 5px 0 0 var(--l3)}.lg-sw.sw-l4{box-shadow:inset 5px 0 0 var(--l4)}
+@media (max-width:820px){#legend{bottom:auto;top:calc(var(--hdr,120px) + 8px);font-size:11px;max-width:220px;padding:8px 10px}}

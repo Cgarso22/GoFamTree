@@ -1,7 +1,7 @@
 let CTX=null;
 
 let CW=196, CH=108, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
-const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),tab:'person',editing:null,
+const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),colorBy:(()=>{try{return localStorage.getItem('gft-color')||'relation';}catch(e){return 'relation';}})(),tab:'person',editing:null,
   db:null,user:null,assets:null,downloads:null,isOwner:false,uid:null,canWrite:null,suggest:[],mine:null,names:{}};
 const $=id=>document.getElementById(id);
 function h(tag,props,...kids){const el=document.createElement(tag);if(props)for(const[k,v]of Object.entries(props)){
@@ -280,11 +280,12 @@ function renderTree(scroll){
       canvas.append(h('div',{class:'gen-label',style:`top:62px;left:${x}px`,text:S.view==='pedigree'?(c===0?firstName(S.focus):gname(c)):('Generation '+(c+1))}));}}
   const gens=L.horiz?new Set():new Set([...L.nodes.values()].map(n=>n.y));
   for(const y of gens){const k=Math.round((y-L.y0)/RH);canvas.append(h('div',{class:'gen-label',style:`top:${y+CH/2-8}px;left:20px`,text:gname(k)}));}
-  for(const n of L.nodes.values()){const p=P(n.id);const r=rel(n.id);
+  const CL=S.colorBy==='none'?null:classify(S.focus);canvas.className='cm-'+S.colorBy;renderLegend(CL?CL.slot:[]);
+  for(const n of L.nodes.values()){const p=P(n.id);const r=rel(n.id);const ci=CL?.map.get(n.id)||{kind:'married',line:-1};
     const ph=portraitOf(p);
     const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}");background-position:${facePos(p,ph)}`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
-    const inlaw=n.id!==S.focus&&(n.inlaw||(!L.horiz&&[2,7,8].includes(r.cat)));
-    const card=h('button',{class:'card'+(inlaw?' inlaw':'')+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
+    const inlaw=n.id!==S.focus&&(ci.kind==='married'||n.inlaw||(!L.horiz&&[2,7,8].includes(r.cat)));
+    const card=h('button',{class:'card k-'+ci.kind+' ln-'+ci.line+(inlaw?' inlaw':'')+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
       av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
@@ -322,14 +323,17 @@ export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
       const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);const kx=kn.x+CW/2,ky=kn.y;line(`M${px} ${py} V${ky-24} H${kx} V${ky}`);}
     for(const e of PL.spouseEdges){const a=PL.nodes.get(e.a),b=PL.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];line(`M${l.x+CW} ${l.y+CH/2} H${r.x}`,e.ex);}
   }
-  for(const n of PL.nodes.values()){const p=P(n.id);const r=relation(F,n.id,ancMap(F));
+  const CLp=S.colorBy==='none'?null:classify(F);const LC=['#86602F','#3D6A8C','#4E7D52','#A65A3A','#7B5C93'];
+  for(const n of PL.nodes.values()){const p=P(n.id);const r=relation(F,n.id,ancMap(F));const ci=CLp?.map.get(n.id);
+    const stripe=!ci||ci.kind==='married'||ci.kind==='self'?null:S.colorBy==='line'?LC[ci.line]||null:(ci.kind==='direct'?'#86602F':'#D9C6A8');
     const inlaw=n.id!==F&&(n.inlaw||(!PL.horiz&&[2,7,8].includes(r.cat)));
     const fill=n.id===F?'#EFE5D6':inlaw?'#FBFAF8':'#FFFFFF',stroke=n.id===F?'#86602F':'#D9C6A8';
     const nm=wrap2(cardName(p),25),ds=cardDates(p);let y=n.y+15;const t=[];
     if(mode!=='everyone'){t.push(`<text x="${n.x+9}" y="${y}" font-size="7.5" letter-spacing=".6" fill="#86602F" font-weight="600">${escX(r.l.toUpperCase())}</text>`);y+=12;}
     for(const s of nm){t.push(`<text x="${n.x+9}" y="${y}" font-family="Literata,Georgia,serif" font-size="11" fill="${inlaw?'#5d564e':'#24211D'}">${escX(s)}</text>`);y+=12.5;}
     for(const s of ds){if(y>n.y+CH-4)break;t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" fill="#756D63">${escX(s)}</text>`);y+=10.5;}
-    out.push(`<g><rect x="${n.x}" y="${n.y}" width="${CW}" height="${CH}" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="${n.id===F?1.6:1}"${p.placeholder?' stroke-dasharray="3 2"':''}/>${t.join('')}</g>`);}
+    const dash=p.placeholder||ci?.kind==='married';const ms=S.colorBy==='line'&&ci?.kind==='married'&&LC[ci.line]?LC[ci.line]:stroke;
+    out.push(`<g><rect x="${n.x}" y="${n.y}" width="${CW}" height="${CH}" rx="6" fill="${fill}" stroke="${ms}" stroke-width="${n.id===F?1.6:1}"${dash?' stroke-dasharray="3 2"':''}/>${stripe?`<rect x="${n.x+0.5}" y="${n.y+0.5}" width="4" height="${CH-1}" rx="2" fill="${stripe}"/>`:''}${t.join('')}</g>`);}
   [CW,CH,GX,RH,CG,RG,SPI]=save;
   const svgBody=out.join('');
   const head=`<div class="hd"><span class="t"><b>${escX(famName||'Family Tree')}</b> · ${escX(title)}</span><span>Printed ${new Date().toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'})} · gofamtree.com</span></div>`;
@@ -355,6 +359,37 @@ ${pages}</body></html>`;
   const w=window.open('','_blank');if(!w){toast('Allow pop-ups for this site to print.');return;}
   w.document.open();w.document.write(html);w.document.close();
 }
+
+/* ---------- colors: whose line is whose ---------- */
+// kind: self | direct (ancestor or descendant) | blood (shares an ancestor) | married (married into the family)
+// line: which of the centered person's four grandparents the connection runs through (1-4), or 0 for their own household
+function classify(F){const AF=ancMap(F);const gps=[];for(const p of parentsOf(F).slice(0,2))for(const g of parentsOf(p).slice(0,2))gps.push(g);
+  // pad so father's parents are 1-2 and mother's parents are 3-4
+  const ps=parentsOf(F);const slot=[];ps.forEach((p,i)=>parentsOf(p).slice(0,2).forEach((g,j)=>slot.push([g,i*2+j+1])));
+  const gpAnc=slot.map(([g,n])=>[n,new Set(ancMap(g).keys())]);
+  const lineOfAnc=a=>{for(const[n,set]of gpAnc)if(set.has(a))return n;return 0;};
+  const desc=new Set();const q=[F];while(q.length){const c=q.shift();for(const k of childrenOf(c))if(!desc.has(k)){desc.add(k);q.push(k);}}
+  const out=new Map();
+  for(const id of S.people.keys()){
+    if(id===F){out.set(id,{kind:'self',line:0});continue;}
+    if(AF.has(id)){out.set(id,{kind:'direct',line:AF.get(id)<=1?0:lineOfAnc(id)});continue;}
+    if(desc.has(id)){out.set(id,{kind:'direct',line:0});continue;}
+    const A=ancMap(id);let best=null;for(const[a,d]of A)if(AF.has(a)){const dd=AF.get(a);if(!best||dd<best.d||(dd===best.d&&lineOfAnc(a)<lineOfAnc(best.a)))best={a,d:dd};}
+    if(best)out.set(id,{kind:'blood',line:best.d<=1?0:lineOfAnc(best.a)});}
+  // people who married in take the color of the relative they married
+  for(const id of S.people.keys())if(!out.has(id)){const sp=spousesOf(id).map(s=>out.get(s)).find(Boolean);
+    let via=sp;if(!via){for(const c of childrenOf(id)){if(out.get(c)){via=out.get(c);break;}}}
+    out.set(id,{kind:'married',line:via?via.line:-1});}
+  return{map:out,slot};}
+function lineName(g){const p=P(g);if(!p)return'';const sur=p.maiden||p.last||String(p.name||'').split(' ').pop();return sur+' ('+(p.nick||p.first||firstName(g))+')';}
+function renderLegend(slot){const el=$('legend');if(!el)return;
+  const sel=h('select',{'aria-label':'Color the tree by'},[['relation','Color by relationship'],['line','Color by family line'],['none','No colors']].map(([v,t])=>h('option',{value:v,selected:S.colorBy===v},t)));
+  sel.onchange=()=>{S.colorBy=sel.value;try{localStorage.setItem('gft-color',S.colorBy);}catch(e){}renderTree(false);};
+  const item=(cls,label)=>h('div',{class:'lg-i'},h('span',{class:'lg-sw '+cls}),label);
+  let rows=[];
+  if(S.colorBy==='relation')rows=[item('sw-direct','Direct line: parents, grandparents, children'),item('sw-blood','Blood relatives: siblings, aunts, uncles, cousins'),item('sw-married','Married into the family')];
+  else if(S.colorBy==='line'){rows=[item('sw-l0',firstName(S.focus)+'’s own family'),...slot.map(([g,n])=>item('sw-l'+n,lineName(g)+' line')),item('sw-married','Married in (outline shows whose family)')];}
+  el.replaceChildren(sel,...rows);el.hidden=false;}
 
 /* ---------- trace the line between two people ---------- */
 function pathBetween(a,b){if(!a||!b||a===b)return[];const prev=new Map([[a,null]]);const q=[a];
