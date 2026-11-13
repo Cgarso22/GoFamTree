@@ -610,12 +610,17 @@ async function openRequestLink(id) {
 // ---------- print ----------
 function printModal(famName) {
   const who = focusName() || 'this person';
+  const cous = h('select', { name: 'cousins' }, [['0', 'Direct line and siblings'], ['1', 'Up to first cousins'], ['2', 'Up to second cousins'], ['3', 'Up to third cousins'], ['4', 'Up to fourth cousins'], ['9', 'Everyone on that side']]
+    .map(([v, t]) => h('option', { value: v, selected: v === '1' }, t)));
   const opt = (name, value, label, sub, checked) => h('label', { class: 'pr-opt' }, h('input', { type: 'radio', name, value, checked }),
     h('span', null, h('strong', { text: label }), h('span', { class: 'm-sub', text: sub })));
   const form = h('form', { class: 'gate-form' },
     h('h3', { text: 'What to print' }),
     opt('what', 'family', who + '’s family', 'Their ancestors back 5 generations, plus brothers, sisters, children and grandchildren.', true),
     opt('what', 'ancestors', who + '’s ancestors', 'A classic pedigree chart: parents, grandparents and great-grandparents.'),
+    opt('what', 'father', who + '’s father’s side', 'The paternal line, with as many cousins as you choose below.'),
+    opt('what', 'mother', who + '’s mother’s side', 'The maternal line, with as many cousins as you choose below.'),
+    h('label', { class: 'pr-sub' }, 'Cousins to include on that side', cous),
     opt('what', 'everyone', 'Everyone', 'Every branch, cousin and in-law in the tree, oldest generations on the left.'),
     h('h3', { text: 'Size' }),
     opt('size', 'one', 'One page', 'Everything shrunk to fit a single sheet. Best for the smaller charts.', true),
@@ -625,6 +630,6 @@ function printModal(famName) {
     opt('paper', 'tabloid', 'Tabloid (11 × 17)', 'Bigger and easier to read. Most print shops and office printers can do it.'),
     h('button', { class: 'btn primary', type: 'submit', text: 'Open printable version' }),
     h('p', { class: 'm-sub', text: 'It opens in a new tab. From there, print it or choose “Save as PDF.” To print someone else’s family, center the tree on them first.' }));
-  form.onsubmit = e => { e.preventDefault(); const fd = new FormData(form); printTree(fd.get('what'), fd.get('size'), famName, fd.get('paper')); closeModal(); };
+  form.onsubmit = e => { e.preventDefault(); const fd = new FormData(form); printTree(fd.get('what'), fd.get('size'), famName, fd.get('paper'), { cousins: +fd.get('cousins') }); closeModal(); };
   modal(h('h2', { text: 'Print the family tree' }), form);
 }

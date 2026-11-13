@@ -30,7 +30,7 @@
   </div>
   <div class="centered" id="centered">Loading the family…</div>
   <div class="tools">
-    <select class="btn small" id="viewSel" aria-label="Tree view"><option value="centered">Centered view</option><option value="whole">Whole family, left to right</option><option value="pedigree">Ancestors, left to right</option></select>
+    <select class="btn small" id="viewSel" aria-label="Tree view"><option value="centered">Centered view</option><option value="whole">Whole family, left to right</option><option value="pedigree">Ancestors, left to right</option><option value="branch">Father’s or mother’s side, with cousins</option></select>
     <button class="btn small" id="zoomOut" aria-label="Zoom out">−</button>
     <button class="btn small" id="zoomIn" aria-label="Zoom in">+</button>
     <button class="btn small" id="recenter">Re-center</button>
@@ -39,6 +39,11 @@
     <button class="btn small ghost" id="acctBtn" aria-haspopup="true">Account</button>
   </div>
 </header>
+<div class="subbar" id="branchBar" hidden>
+  <label>Side <select id="brSide"><option value="father">Father’s side (paternal)</option><option value="mother">Mother’s side (maternal)</option><option value="both">Both sides</option></select></label>
+  <label>Include <select id="brCous"><option value="0">Direct line and siblings</option><option value="1">Up to first cousins</option><option value="2">Up to second cousins</option><option value="3">Up to third cousins</option><option value="4">Up to fourth cousins</option><option value="9">Everyone on this side</option></select></label>
+  <span class="subbar-note">First cousins share grandparents, second cousins share great-grandparents, third cousins share 2× great-grandparents.</span>
+</div>
 <main>
   <div id="stage"><div id="scaler"><div id="canvas"><svg id="links"></svg></div></div>
     <div class="empty" id="empty"><div><h2>Loading the family…</h2><p>The tree appears here in a moment.</p></div></div>

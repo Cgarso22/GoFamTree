@@ -48,3 +48,8 @@
 .pr-opt input{width:auto!important;margin-top:3px}
 .pr-opt>span{display:flex;flex-direction:column;gap:2px}
 .pr-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.subbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--surface);border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.subbar label{display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)}
+.subbar select{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:5px 8px;font-size:13px;color:var(--ink)}
+.subbar-note{font-size:12px}
+.pr-sub{margin-left:30px}

@@ -1,7 +1,9 @@
 let CTX=null;
 
 let CW=196, CH=120, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
-const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),colorBy:(()=>{try{return localStorage.getItem('gft-color')||'relation';}catch(e){return 'relation';}})(),tab:'person',editing:null,
+const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),colorBy:(()=>{try{return localStorage.getItem('gft-color')||'relation';}catch(e){return 'relation';}})(),
+  side:(()=>{try{return localStorage.getItem('gft-side')||'father';}catch(e){return 'father';}})(),
+  cousins:(()=>{try{return +(localStorage.getItem('gft-cousins')??1);}catch(e){return 1;}})(),tab:'person',editing:null,
   db:null,user:null,assets:null,downloads:null,isOwner:false,uid:null,canWrite:null,suggest:[],mine:null,names:{}};
 const $=id=>document.getElementById(id);
 function h(tag,props,...kids){const el=document.createElement(tag);if(props)for(const[k,v]of Object.entries(props)){
@@ -250,6 +252,30 @@ function layoutPedigree(F){const depth=new Map([[F,0]]);
   const R=tidyH([F],id=>[id],blk=>{const ps=parentsOf(blk[0]).filter(p=>P(p));const d=depth.get(blk[0])+1;
       if(d>6)return[];ps.forEach(p=>{if(!depth.has(p))depth.set(p,d);});return ps;},id=>depth.get(id));
   return finishH(R,id=>depth.get(id),c=>-c);}
+/* ---------- one side of the family, with cousins out to a chosen degree ---------- */
+function parentOnSide(F,side){const ps=parentsOf(F).filter(p=>P(p));
+  if(side==='father')return ps.find(p=>P(p).g==='m')||ps.find(p=>P(p).g!=='f')||null;
+  if(side==='mother')return ps.find(p=>P(p).g==='f')||ps.find(p=>P(p).g!=='m'&&p!==parentOnSide(F,'father'))||null;return null;}
+// n = 0: direct line and brothers/sisters; 1: first cousins (share grandparents); 2: second cousins; 3: third cousins; 9: everyone on that side
+function branchSet(F,side,n){const inc=new Set([F]);
+  const addDesc=id=>{const q=[id];while(q.length){const c=q.shift();for(const k of childrenOf(c))if(!inc.has(k)){inc.add(k);q.push(k);}}};
+  addDesc(F);
+  const roots=side==='both'?parentsOf(F):[parentOnSide(F,side)].filter(Boolean);
+  for(const r of roots)for(const[a,d]of ancMap(r)){const g=d+1;inc.add(a);
+    if(g===1&&n===0)for(const s of childrenOf(a))inc.add(s);
+    else if(g<=n+1)addDesc(a);}
+  for(const id of[...inc])for(const s of spousesOf(id))if(P(s))inc.add(s);
+  return inc;}
+function layoutBranch(F,side=S.side,n=S.cousins){const inc=branchSet(F,side,n);const g=genMap();
+  const isRoot=i=>!parentsOf(i).some(p=>inc.has(p));
+  const anc=[...ancMap(F).keys()].filter(a=>inc.has(a)&&isRoot(a)).sort((a,b)=>g.get(a)-g.get(b));
+  const roots=[...new Set([...anc,...[...inc].filter(isRoot).sort((a,b)=>g.get(a)-g.get(b)||byBirth(a,b)),...inc])];
+  const ord=(id,s)=>unionsOf(id).find(u=>other(u,id)===s)?.order||0;
+  const R=tidyH(roots,(id,placed)=>[id,...spousesOf(id).filter(s=>s!==id&&inc.has(s)&&!placed.has(s)&&isRoot(s)).sort((a,b)=>ord(id,a)-ord(id,b))],
+    blk=>[...new Set(blk.flatMap(b=>childrenOf(b)))].filter(k=>inc.has(k)).sort(byBirth),id=>g.get(id));
+  return finishH(R,id=>g.get(id),c=>c);}
+const COUSIN_LABEL={0:'Direct line and siblings',1:'Up to first cousins',2:'Up to second cousins',3:'Up to third cousins',4:'Up to fourth cousins',9:'Everyone on this side'};
+
 /* ---------- render tree ---------- */
 let L=null, AF=null;
 function rel(id){return relation(S.focus,id,AF);}
@@ -257,7 +283,7 @@ function renderTree(scroll){
   const canvas=$('canvas'),svg=$('links');
   canvas.querySelectorAll('.card,.gen-label').forEach(e=>e.remove());
   if(!S.focus||!P(S.focus)){return;}
-  AF=ancMap(S.focus);L=S.view==='whole'?layoutWhole(S.focus):S.view==='pedigree'?layoutPedigree(S.focus):layout(S.focus);
+  AF=ancMap(S.focus);L=S.view==='branch'?layoutBranch(S.focus):S.view==='whole'?layoutWhole(S.focus):S.view==='pedigree'?layoutPedigree(S.focus):layout(S.focus);
   canvas.style.width=L.w+'px';canvas.style.height=L.h+'px';svg.setAttribute('width',L.w);svg.setAttribute('height',L.h);
   svg.replaceChildren();
   const NS='http://www.w3.org/2000/svg';const pth=(d,cls,data)=>{const e=document.createElementNS(NS,'path');e.setAttribute('d',d);if(cls)e.setAttribute('class',cls);if(data)for(const[k,v]of Object.entries(data))e.dataset[k]=v;svg.append(e);};
@@ -282,7 +308,7 @@ function renderTree(scroll){
       canvas.append(h('div',{class:'gen-label',style:`top:62px;left:${x}px`,text:S.view==='pedigree'?(c===0?firstName(S.focus):gname(c)):('Generation '+(c+1))}));}}
   const gens=L.horiz?new Set():new Set([...L.nodes.values()].map(n=>n.y));
   for(const y of gens){const k=Math.round((y-L.y0)/RH);canvas.append(h('div',{class:'gen-label',style:`top:${y+CH/2-8}px;left:20px`,text:gname(k)}));}
-  const CL=S.colorBy==='none'?null:classify(S.focus);canvas.className='cm-'+S.colorBy;renderLegend(CL?CL.slot:[]);
+  const CL=S.colorBy==='none'?null:classify(S.focus);canvas.className='cm-'+S.colorBy;renderLegend(CL?CL.slot.filter(([,n])=>[...L.nodes.keys()].some(id=>CL.map.get(id)?.line===n)):[]);
   for(const n of L.nodes.values()){const p=P(n.id);const r=rel(n.id);const ci=CL?.map.get(n.id)||{kind:'married',line:-1};
     const ph=portraitOf(p);
     const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}");background-position:${facePos(p,ph)}`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
@@ -305,12 +331,14 @@ function centerOnFocus(){if(!L)return;const n=L.nodes.get(S.focus);const st=$('s
 const escX=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function wrap2(s,max){if(s.length<=max)return[s];const w=s.split(' ');let a='';while(w.length&&(a+' '+w[0]).trim().length<=max)a=(a+' '+w.shift()).trim();
   let b=w.join(' ');if(b.length>max)b=b.slice(0,max-1)+'…';return a?[a,b]:[s.slice(0,max-1)+'…'];}
-export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
+export function printTree(mode,size,famName,paper,opts){const big=paper==='tabloid';
   const save=[CW,CH,GX,RH,CG,RG,SPI];
   CW=172;CH=74;GX=10;RH=112;CG=44;RG=8;SPI=16;
   const F=S.focus;let PL,title;
   try{
     if(mode==='everyone'){PL=layoutWhole(F);title='Everyone in the family';}
+    else if(mode==='father'||mode==='mother'||mode==='both'){const n=opts?.cousins??S.cousins;PL=layoutBranch(F,mode,n);
+      title=nameOf(F)+(mode==='father'?'’s father’s side':mode==='mother'?'’s mother’s side':'’s family branches')+' · '+COUSIN_LABEL[n].toLowerCase();}
     else if(mode==='ancestors'){PL=layoutPedigree(F);title=nameOf(F)+'’s ancestors';}
     else{PL=layout(F);title=nameOf(F)+'’s family';}
   }catch(e){[CW,CH,GX,RH,CG,RG,SPI]=save;throw e;}
@@ -331,7 +359,7 @@ export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
     const inlaw=n.id!==F&&(n.inlaw||(!PL.horiz&&[2,7,8].includes(r.cat)));
     const fill=n.id===F?'#EFE5D6':inlaw?'#FBFAF8':'#FFFFFF',stroke=n.id===F?'#86602F':'#D9C6A8';
     const nm=wrap2(cardName(p),25),ds=cardDates(p);let y=n.y+15;const t=[];
-    if(mode!=='everyone'){t.push(`<text x="${n.x+9}" y="${y}" font-size="7.5" letter-spacing=".6" fill="#86602F" font-weight="600">${escX(r.l.toUpperCase())}</text>`);y+=12;}
+    if(mode!=='everyone'&&r.l){t.push(`<text x="${n.x+9}" y="${y}" font-size="7.5" letter-spacing=".6" fill="#86602F" font-weight="600">${escX(r.l.toUpperCase())}</text>`);y+=12;}
     for(const s of nm){t.push(`<text x="${n.x+9}" y="${y}" font-family="Literata,Georgia,serif" font-size="11" fill="${inlaw?'#5d564e':'#24211D'}">${escX(s)}</text>`);y+=12.5;}
     if(p.aka&&y<n.y+CH-14){t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" font-style="italic" fill="#756D63">aka ${escX(p.aka)}</text>`);y+=10.5;}
     for(const s of ds){if(y>n.y+CH-4)break;t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" fill="#756D63">${escX(s)}</text>`);y+=10.5;}
@@ -772,7 +800,11 @@ $('q').addEventListener('input',()=>{const q=$('q').value.trim().toLowerCase();c
 document.addEventListener('click',e=>{if(!e.target.closest('.search'))$('results').hidden=true;});
 $('zoomIn').onclick=()=>{S.scale=Math.min(1.6,S.scale+0.15);applyScale();};
 $('zoomOut').onclick=()=>{S.scale=Math.max(0.2,S.scale-0.15);applyScale();};
-{const vs=$('viewSel');if(vs){vs.value=S.view;vs.onchange=()=>{S.view=vs.value;try{localStorage.setItem('gft-view',S.view);}catch(e){}
+{const bs=$('brSide'),bc=$('brCous');if(bs&&bc){bs.value=S.side;bc.value=String(S.cousins);
+  bs.onchange=()=>{S.side=bs.value;try{localStorage.setItem('gft-side',S.side);}catch(e){}renderTree(true);};
+  bc.onchange=()=>{S.cousins=+bc.value;try{localStorage.setItem('gft-cousins',S.cousins);}catch(e){}renderTree(true);};}}
+const syncBar=()=>{const b=$('branchBar');if(b)b.hidden=S.view!=='branch';};syncBar();
+{const vs=$('viewSel');if(vs){vs.value=S.view;vs.onchange=()=>{S.view=vs.value;try{localStorage.setItem('gft-view',S.view);}catch(e){}syncBar();
   if(S.view==='whole'&&S.scale>0.8)S.scale=0.7;renderTree(true);};}}
 $('recenter').onclick=()=>centerOnFocus();
 (()=>{const st=$('stage');let d=null;st.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'||e.target.closest('.card'))return;d={x:e.clientX,y:e.clientY,l:st.scrollLeft,t:st.scrollTop};st.classList.add('dragging');});
