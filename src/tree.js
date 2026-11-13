@@ -11,6 +11,9 @@ function h(tag,props,...kids){const el=document.createElement(tag);if(props)for(
 function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600);}
 const P=id=>S.people.get(id);
 const nameOf=id=>P(id)?.name||'Unknown';
+const joinName=(a,b,c)=>[a,b,c].map(x=>String(x||'').trim()).filter(Boolean).join(' ');
+// how a person appears on the tree: real name, with the nickname in quotes when there is one
+function cardName(p){if(p.nick&&p.first)return joinName(p.first,'“'+p.nick+'”',p.last);return p.name;}
 const isUnknown=p=>!p||/\?/.test(p.name||'')||p.placeholder;
 const yearOf=s=>{const m=String(s||'').match(/\b(1[6-9]\d\d|20\d\d)\b/);return m?m[1]:null;};
 function lifespan(p){const b=yearOf(p.born),d=yearOf(p.died);
@@ -25,7 +28,7 @@ const MILESTONES=['Birth','Baby naming / bris','First birthday','First day of sc
 function galleryOf(p){if(Array.isArray(p?.gallery))return p.gallery;const ph=p?.photos||{};return STAGES.filter(([s])=>ph[s]).map(([s])=>({id:ph[s],stage:s}));}
 // where to center a photo when it's cropped to a circle: the face, if we know it
 function facePos(p,id){const g=galleryOf(p).find(x=>x.id===id);const f=g?.face;return f?`${Math.round(f.x)}% ${Math.round(f.y)}%`:'50% 28%';}
-function portraitOf(p){if(p.portrait)return p.portrait;const g=galleryOf(p);return (g.find(x=>x.stage==='adult')||g.find(x=>x.stage==='older')||g[0]||{}).id;}
+function portraitOf(p){if(p.portrait)return p.portrait;const g=galleryOf(p).filter(x=>!x.notPortrait);return (g.find(x=>x.stage==='adult')||g.find(x=>x.stage==='older')||g[0]||{}).id;}
 function photoAge(p,ph){if(ph.age)return String(ph.age);const by=+yearOf(p.born),y=+ph.year;return by&&y&&y>=by?String(y-by):'';}
 function photoLine(p,ph){const a=photoAge(p,ph);return [a&&('Age ~'+a),ph.year,ph.milestone].filter(Boolean).join(' · ');}
 const PERIODS=[['child','Childhood'],['adult','Adult life'],['older','Later in life'],['general','Any time']];
@@ -273,7 +276,7 @@ function renderTree(scroll){
     const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}");background-position:${facePos(p,ph)}`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
     const card=h('button',{class:'card'+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
-      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:p.name}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
+      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
   applyScale();
   $('centered').replaceChildren('Centered on ',h('b',{text:P(S.focus).name}),' · click a person, then click again to re-center');
@@ -333,7 +336,7 @@ async function apply(op){const db=S.db;
 }
 
 /* ---------- panel ---------- */
-const FIELD_LABEL={bornPlace:'Birthplace',diedPlace:'Place of death',buriedPlace:'Cemetery location',residence:'Lives in',jobs:'Work history',hsSchool:'High school',hsYear:'Graduated',colSchool:'College',colDegree:'Degree',colYear:'Graduated',gradSchool:'Graduate school',gradDegree:'Degree',gradYear:'Graduated',eduOther:'Other education',occupation:'Occupation',education:'Education & degrees',name:'Name',g:'Gender',maiden:'Birth surname',nick:'Also known as',born:'Born',bornPlace:'Birthplace',bornHospital:'Birth hospital',died:'Died',diedPlace:'Place of death',buried:'Buried',deceased:'Deceased',notes:'Notes'};
+const FIELD_LABEL={first:'First name',middle:'Middle name',last:'Last name',bornPlace:'Birthplace',diedPlace:'Place of death',buriedPlace:'Cemetery location',residence:'Lives in',jobs:'Work history',hsSchool:'High school',hsYear:'Graduated',colSchool:'College',colDegree:'Degree',colYear:'Graduated',gradSchool:'Graduate school',gradDegree:'Degree',gradYear:'Graduated',eduOther:'Other education',occupation:'Occupation',education:'Education & degrees',name:'Name',g:'Gender',maiden:'Birth surname',nick:'Nickname',born:'Born',bornPlace:'Birthplace',bornHospital:'Birth hospital',died:'Died',diedPlace:'Place of death',buried:'Buried',deceased:'Deceased',notes:'Notes'};
 function setTab(t){S.tab=t;['person','rel','review'].forEach(x=>$('tab-'+x).setAttribute('aria-selected',String(x===t)));renderPanel();}
 $('tab-person').onclick=()=>setTab('person');$('tab-rel').onclick=()=>setTab('rel');$('tab-review').onclick=()=>setTab('review');
 $('closeSheet').onclick=()=>$('aside').classList.add('closed');
@@ -346,7 +349,7 @@ function renderPanel(){const panel=$('panel');panel.replaceChildren();
   if(S.editing)return renderEdit(panel,p);
   const r=AF?rel(id):{l:''};
   panel.append(h('div',{class:'p-head'},h('div',{class:'p-rel',text:id===S.focus?'Centered here':r.l+' of '+firstName(S.focus)}),
-    h('h2',{text:p.name}),(p.maiden||p.nick)?h('div',{class:'p-sub',text:[p.maiden&&('born '+p.maiden),p.nick&&('also known as '+p.nick)].filter(Boolean).join(' · ')}):null));
+    h('h2',{text:p.name}),(p.maiden||p.nick||p.aka)?h('div',{class:'p-sub',text:[p.maiden&&('born '+p.maiden),p.nick&&('goes by “'+p.nick+'”'),p.aka&&('also known as '+p.aka)].filter(Boolean).join(' · ')}):null));
   const acts=h('div',{class:'p-actions'});
   if(id!==S.focus)acts.append(h('button',{class:'btn primary',onclick:()=>setFocus(id),text:'Center tree on '+firstName(id)}));
   if(mode()!=='view')acts.append(h('button',{class:'btn',onclick:()=>{S.editing={type:'person'};renderPanel();},text:mode()==='edit'?'Edit details':'Suggest a correction'}));
@@ -574,9 +577,10 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
   if(isNew&&ed.rel==='spouse')extra.push(h('label',null,'Status',h('select',{id:'f-ustatus'},['married','divorced','widowed','ended'].map(s=>h('option',{value:s},cap(s))))),
     h('label',null,'Married',dateField({id:'f-umarried'},'')),h('label',null,'Divorced (if divorced)',dateField({id:'f-udivorced'},'')));
   const f=h('form',{class:'edit'},h('div',{class:'p-head'},back,h('h2',{text:isNew?'Add '+(ed.rel==='child'?'a child':'a '+ed.rel)+' of '+firstName(p.id):(sugg?'Suggest a correction':'Edit '+firstName(p.id))})),
-    inp('name','Full name'),
+    h('div',{class:'row'},h('label',null,'First name',h('input',{id:'f-first',value:src.first||'',autocomplete:'off'})),h('label',null,'Middle name',h('input',{id:'f-middle',value:src.middle||'',autocomplete:'off'}))),
+    h('div',{class:'row'},h('label',null,'Last name',h('input',{id:'f-last',value:src.last||'',autocomplete:'off'})),h('label',null,'Nickname (shown on the tree)',h('input',{id:'f-nick',value:src.nick||'',autocomplete:'off',placeholder:'e.g. Bud'}))),
+    (!isNew&&!src.first&&!src.last)?h('p',{class:'q',style:'margin:0;font-size:12px',text:'Currently listed as “'+(src.name||'')+'”. Fill in the name fields to replace it.'}):null,
     h('div',{class:'row'},h('label',null,'Gender',h('select',{id:'f-g'},[['','Not set'],['f','Female'],['m','Male']].map(([v,t])=>h('option',{value:v,selected:(src.g||'')===v},t)))),inp('maiden','Maiden or birth name')),
-    inp('nick','Nickname'),
     h('label',null,'Born',dateField({id:'f-born'},src.born)),inp('bornHospital','Hospital, if known'),
     locInput('bornPlace','Birthplace',src.bornPlace),
     h('div',{id:'f-livebox',hidden:!!src.deceased},locInput('residence','Lives in',src.residence)),
@@ -593,9 +597,11 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
     ...extra,
     h('button',{class:'btn primary',type:'submit',text:sugg?'Send for review':'Save'}));
   f.onsubmit=async e=>{e.preventDefault();const data={};
-    for(const k of['name','g','maiden','nick','born','bornHospital','hsSchool','hsYear','colSchool','colDegree','colYear','gradSchool','gradDegree','gradYear','eduOther','died','buried','notes']){const v=$('f-'+k).value.trim();if(isNew?v:v!==(src[k]||''))data[k]=v;}
+    for(const k of['first','middle','last','g','maiden','nick','born','bornHospital','hsSchool','hsYear','colSchool','colDegree','colYear','gradSchool','gradDegree','gradYear','eduOther','died','buried','notes']){const v=$('f-'+k).value.trim();if(isNew?v:v!==(src[k]||''))data[k]=v;}
     for(const k of['bornPlace','residence','diedPlace','buriedPlace']){const v=readLoc(k);if(isNew?v:!sameLoc(v,src[k]||''))data[k]=v;}
     const jobs=[...jobList.querySelectorAll('.job')].map(r=>({company:r.querySelector('.j-company').value.trim(),role:r.querySelector('.j-role').value.trim(),from:r.querySelector('.j-from').value.trim(),to:r.querySelector('.j-to').value.trim()})).filter(j=>j.company||j.role).map(j=>Object.fromEntries(Object.entries(j).filter(([,v])=>v)));
+    {const nf=$('f-first').value.trim(),nm=$('f-middle').value.trim(),nl=$('f-last').value.trim();const full=joinName(nf,nm,nl);
+      if(full&&full!==src.name)data.name=full;}
     const oldJobs=Array.isArray(src.jobs)?src.jobs:(src.occupation?[{role:src.occupation}]:[]);
     if(JSON.stringify(jobs)!==JSON.stringify(oldJobs)&&(jobs.length||oldJobs.length))data.jobs=jobs;
     const dec=$('f-deceased').checked;if(isNew?dec:dec!==!!src.deceased)data.deceased=dec;
