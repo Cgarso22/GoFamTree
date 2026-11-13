@@ -1,0 +1,34 @@
+/* Sign-in screen, modals and member lists. Uses the tree's tokens. */
+#gate{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;
+  padding-block:32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(180deg,var(--bg),var(--wood))}
+#app{flex:1;min-height:0;display:flex;flex-direction:column}
+.gate-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:28px 24px;display:flex;flex-direction:column;gap:12px}
+.gate-brand{display:flex;align-items:center;gap:10px;font-family:var(--f-name);font-size:26px;font-weight:600;letter-spacing:-.01em}
+.mark{width:28px;height:28px;border-radius:7px;background:var(--accent) url("/favicon.svg") center/cover}
+.gate-lead{margin:0;font-size:15px;line-height:1.5;color:var(--ink);text-wrap:pretty}
+.gate-note{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
+.gate-msg{margin:0;font-size:13px;color:var(--accent);min-height:0}
+.gate-msg:empty{display:none}
+.gate-form{display:flex;flex-direction:column;gap:10px}
+.gate-form label,#modalCard label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--muted)}
+.gate-form input,.gate-form select,#modalCard input,#modalCard select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;color:var(--ink);width:100%;min-width:0;box-sizing:border-box}
+.btn.wide{width:100%;padding:10px 12px;font-size:14px}
+.gate-or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
+.gate-or::before,.gate-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.linkish{background:none;border:0;padding:4px 0;color:var(--accent);font-size:13px;text-align:left}
+#modal{position:fixed;inset:0;z-index:40;background:rgba(30,24,16,.35);display:flex;align-items:flex-start;justify-content:center;overflow:auto;
+  padding-block:max(24px,env(safe-area-inset-top,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.modal-card{position:relative;width:100%;max-width:520px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:22px 20px;display:flex;flex-direction:column;gap:12px}
+.modal-card h2{margin:0;font-family:var(--f-name);font-size:21px;font-weight:600}
+.modal-card h3{margin:10px 0 0;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.modal-x{position:absolute;top:14px;right:14px}
+.m-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.m-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.m-row:first-child{border-top:0}
+.m-row select{width:auto!important;padding:5px 8px!important;font-size:13px!important}
+.m-who{flex:1;min-width:160px;display:flex;flex-direction:column;gap:2px}
+.m-sub{font-size:12px;color:var(--muted);margin:0}
+.m-role{font-size:12px;color:var(--muted);text-transform:capitalize}
+.linkbox{display:flex;flex-direction:column;gap:6px;background:var(--accent-soft);border-radius:10px;padding:10px}
+.linkbox .row{display:flex;gap:6px}

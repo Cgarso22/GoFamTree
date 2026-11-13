@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GoFamTree</title>
+<meta name="description" content="A private family tree your whole family can explore and add to.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600&display=swap">
+</head>
+<body>
+
+<!-- Sign-in, family picker and other full-page screens -->
+<section id="gate">
+  <div class="gate-card" id="gateCard">
+    <div class="gate-brand"><span class="mark" aria-hidden="true"></span>GoFamTree</div>
+    <p class="gate-lead">Loading…</p>
+  </div>
+</section>
+
+<!-- The tree -->
+<div id="app" hidden>
+<header>
+  <div class="brand" id="brand">GoFamTree</div>
+  <div class="search">
+    <input id="q" type="search" placeholder="Find a person" autocomplete="off" aria-label="Find a person">
+    <div class="results" id="results" hidden></div>
+  </div>
+  <div class="centered" id="centered">Loading the family…</div>
+  <div class="tools">
+    <button class="btn small" id="zoomOut" aria-label="Zoom out">−</button>
+    <button class="btn small" id="zoomIn" aria-label="Zoom in">+</button>
+    <button class="btn small" id="recenter">Re-center</button>
+    <button class="btn small" id="familyBtn">Family</button>
+    <button class="btn small ghost" id="acctBtn" aria-haspopup="true">Account</button>
+  </div>
+</header>
+<main>
+  <div id="stage"><div id="scaler"><div id="canvas"><svg id="links"></svg></div></div>
+    <div class="empty" id="empty"><div><h2>Loading the family…</h2><p>The tree appears here in a moment.</p></div></div>
+  </div>
+  <aside id="aside" class="closed">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-person" aria-selected="true">Person</button>
+      <button class="tab" role="tab" id="tab-rel" aria-selected="false">Relatives</button>
+      <button class="tab" role="tab" id="tab-review" aria-selected="false" hidden>Review</button>
+      <button class="btn ghost small sheet-close" id="closeSheet">Close</button>
+    </div>
+    <div id="panel"></div>
+  </aside>
+</main>
+</div>
+
+<div id="modal" hidden><div class="modal-card" id="modalCard" role="dialog" aria-modal="true"></div></div>
+<div id="toast" hidden></div>
+<div id="lightbox" hidden></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
