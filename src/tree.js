@@ -167,32 +167,39 @@ function layout(F){
         spouseEdges.push({a:ps[0],b:ps[1],ex:u&&['divorced','ended'].includes(u.status)});}}
     else cx=left+w/2;
     if(l>0)put(id,cx-CW/2,-l*RH);return cx;}
-  const fcx=placeAnc(F,0,0);const fx=fcx-CW/2;put(F,fx,0);
+  const fcx=placeAnc(F,0,0);const fx=fcx-CW/2;
+  const SIBDOWN=2; // show brothers' and sisters' children and grandchildren
   const sp=spousesOf(F).filter(s=>!nodes.has(s));
-  sp.forEach((s,i)=>{put(s,fx+(i+1)*(CW+GX),0);const u=unionsOf(F).find(u=>other(u,F)===s);spouseEdges.push({a:F,b:s,ex:u&&['divorced','ended'].includes(u.status)});});
-  const sibs=siblingsOf(F).filter(s=>!nodes.has(s));
-  // older siblings to the left (closest = nearest in age), younger after spouses
+  const sibs=siblingsOf(F).filter(s=>!nodes.has(s)&&!sp.includes(s));
   const fy=+yearOf(P(F).born)||0;const older=sibs.filter(s=>(+yearOf(P(s).born)||0)<=fy&&fy).reverse(),younger=sibs.filter(s=>!older.includes(s));
-  older.forEach((s,i)=>{put(s,fx-(i+1)*(CW+GX),0);});
-  const rightStart=fx+(sp.length+1)*(CW+GX)+GX;
-  younger.forEach((s,i)=>{put(s,rightStart+i*(CW+GX),0);});
-  for(const s of sibs){const ps=parentsOf(s).filter(p=>nodes.has(p));if(ps.length)edges.push({parents:ps,kid:s});}
-  // descendants
-  const dw=new Map();
-  const blockOf=id=>[id,...spousesOf(id).filter(s=>s!==F&&!nodes.has(s))];
-  function kidsOf(id,d){return d<MAXDOWN?childrenOf(id):[];}
-  function descW(id,d){if(dw.has(id))return dw.get(id);const b=d===0?1+sp.length:blockOf(id).length;const bw=b*CW+(b-1)*GX;
-    const ks=kidsOf(id,d);const kw=ks.length?ks.reduce((s,k)=>s+descW(k,d+1),0)+GX*(ks.length-1):0;const w=Math.max(bw,kw);dw.set(id,w);return w;}
-  function placeKids(id,d,center){const ks=kidsOf(id,d).filter(k=>!nodes.has(k));if(!ks.length)return;
-    const kw=ks.reduce((s,k)=>s+descW(k,d+1),0)+GX*(ks.length-1);let cur=center-kw/2;
-    ks.forEach((k,ki)=>{const w=descW(k,d+1);const raw=blockOf(k).filter(x=>!nodes.has(x));const bw=raw.length*CW+(raw.length-1)*GX;
+  // widths of each person's block (them + partners) and everything below it
+  const dw=new Map();const reserved=new Set([F,...sp,...sibs]);
+  const blockOf=id=>id===F?[F,...sp]:[id,...spousesOf(id).filter(s=>s!==F&&!reserved.has(s)&&!nodes.has(s))];
+  function kidsOf(id,d,max){return d<max?childrenOf(id).filter(k=>!reserved.has(k)):[];}
+  function descW(id,d,max){const key=id+'|'+d+'|'+max;if(dw.has(key))return dw.get(key);const b=blockOf(id).length;const bw=b*CW+(b-1)*GX;
+    const ks=kidsOf(id,d,max);const kw=ks.length?ks.reduce((s,k)=>s+descW(k,d+1,max),0)+GX*(ks.length-1):0;const w=Math.max(bw,kw);dw.set(key,w);return w;}
+  function placeKids(id,d,center,max){const ks=kidsOf(id,d,max).filter(k=>!nodes.has(k));if(!ks.length)return;
+    const kw=ks.reduce((s,k)=>s+descW(k,d+1,max),0)+GX*(ks.length-1);let cur=center-kw/2;
+    ks.forEach((k,ki)=>{const w=descW(k,d+1,max);const raw=blockOf(k).filter(x=>!nodes.has(x));const bw=raw.length*CW+(raw.length-1)*GX;
       // partners go on the outer side, so brothers and sisters stay next to each other
       const left=ks.length>1&&ki<Math.floor(ks.length/2);const blk=left?[...raw.slice(1).reverse(),k]:raw;
       const bl=cur+(w-bw)/2;let kx=bl;blk.forEach((x,i)=>{const xx=bl+i*(CW+GX);put(x,xx,(d+1)*RH);if(x===k)kx=xx;
         else{const u=unionsOf(k).find(u=>other(u,k)===x);spouseEdges.push({a:k,b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
       const ps=parentsOf(k).filter(p=>nodes.has(p));edges.push({parents:ps.length?ps:[id],kid:k});
-      placeKids(k,d+1,kx+CW/2+(blk.length>1?(left?-1:1)*(CW+GX)/2:0));cur+=w+GX;});}
-  const fb=1+sp.length;placeKids(F,0,fx+(fb*CW+(fb-1)*GX)/2);
+      placeKids(k,d+1,blk.length>1?bl+bw/2:kx+CW/2,max);cur+=w+GX;});}
+  // the centered person, their partners to the right, their children below
+  put(F,fx,0);
+  sp.forEach((s,i)=>{put(s,fx+(i+1)*(CW+GX),0);const u=unionsOf(F).find(u=>other(u,F)===s);spouseEdges.push({a:F,b:s,ex:u&&['divorced','ended'].includes(u.status)});});
+  const fbw=(1+sp.length)*CW+sp.length*GX,fc=fx+fbw/2,fw=Math.max(fbw,descW(F,0,MAXDOWN));
+  placeKids(F,0,sp.length?fc:fx+CW/2,MAXDOWN);
+  // brothers and sisters on either side, each with their own family below them
+  const placeSib=(s,unitLeft,onLeft)=>{const w=descW(s,0,SIBDOWN);const raw=blockOf(s);const bw=raw.length*CW+(raw.length-1)*GX;
+    const blk=onLeft?[...raw.slice(1).reverse(),s]:raw;const bl=unitLeft+(w-bw)/2;let sx=bl;
+    blk.forEach((x,i)=>{const xx=bl+i*(CW+GX);put(x,xx,0);if(x===s)sx=xx;else{const u=unionsOf(s).find(u=>other(u,s)===x);spouseEdges.push({a:s,b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
+    placeKids(s,0,blk.length>1?bl+bw/2:sx+CW/2,SIBDOWN);return w;};
+  let cur=fc-fw/2-GX*2;for(const s of older){const w=descW(s,0,SIBDOWN);placeSib(s,cur-w,true);cur-=w+GX*2;}
+  cur=fc+fw/2+GX*2;for(const s of younger){const w=placeSib(s,cur,false);cur+=w+GX*2;}
+  for(const s of sibs){const ps=parentsOf(s).filter(p=>nodes.has(p));if(ps.length)edges.push({parents:ps,kid:s});}
   // normalize
   let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
   for(const n of nodes.values()){minX=Math.min(minX,n.x);minY=Math.min(minY,n.y);maxX=Math.max(maxX,n.x+CW);maxY=Math.max(maxY,n.y+CH);}
