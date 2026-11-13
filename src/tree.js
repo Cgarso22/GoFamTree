@@ -1,6 +1,6 @@
 let CTX=null;
 
-let CW=196, CH=108, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
+let CW=196, CH=120, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
 const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),colorBy:(()=>{try{return localStorage.getItem('gft-color')||'relation';}catch(e){return 'relation';}})(),tab:'person',editing:null,
   db:null,user:null,assets:null,downloads:null,isOwner:false,uid:null,canWrite:null,suggest:[],mine:null,names:{}};
 const $=id=>document.getElementById(id);
@@ -13,7 +13,9 @@ const P=id=>S.people.get(id);
 const nameOf=id=>P(id)?.name||'Unknown';
 const joinName=(a,b,c)=>[a,b,c].map(x=>String(x||'').trim()).filter(Boolean).join(' ');
 // how a person appears on the tree: real name, with the nickname in quotes when there is one
-function cardName(p){if(p.nick&&p.first)return joinName(p.first,'“'+p.nick+'”',p.last);return p.name;}
+// full real name (first, middle, last); the nickname goes in quotes after the first name only when "show on tree" is on
+const showNick=p=>!!p.nick&&p.showNick!==false;
+function cardName(p){if(!p.first&&!p.last)return p.name;return joinName(joinName(p.first,p.middle,showNick(p)?'“'+p.nick+'”':''),'',p.last);}
 const isUnknown=p=>!p||/\?/.test(p.name||'')||p.placeholder;
 const yearOf=s=>{const m=String(s||'').match(/\b(1[6-9]\d\d|20\d\d)\b/);return m?m[1]:null;};
 function lifespan(p){const b=yearOf(p.born),d=yearOf(p.died);
@@ -287,7 +289,7 @@ function renderTree(scroll){
     const inlaw=n.id!==S.focus&&(ci.kind==='married'||n.inlaw||(!L.horiz&&[2,7,8].includes(r.cat)));
     const card=h('button',{class:'card k-'+ci.kind+' ln-'+ci.line+(inlaw?' inlaw':'')+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
-      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
+      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),p.aka?h('div',{class:'aka',text:'aka '+p.aka}):null,...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
   applyScale();highlightPath();
   $('centered').replaceChildren('Centered on ',h('b',{text:P(S.focus).name}),' · click a person, then click again to re-center');
@@ -305,7 +307,7 @@ function wrap2(s,max){if(s.length<=max)return[s];const w=s.split(' ');let a='';w
   let b=w.join(' ');if(b.length>max)b=b.slice(0,max-1)+'…';return a?[a,b]:[s.slice(0,max-1)+'…'];}
 export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
   const save=[CW,CH,GX,RH,CG,RG,SPI];
-  CW=168;CH=64;GX=10;RH=112;CG=44;RG=8;SPI=16;
+  CW=172;CH=74;GX=10;RH=112;CG=44;RG=8;SPI=16;
   const F=S.focus;let PL,title;
   try{
     if(mode==='everyone'){PL=layoutWhole(F);title='Everyone in the family';}
@@ -331,6 +333,7 @@ export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
     const nm=wrap2(cardName(p),25),ds=cardDates(p);let y=n.y+15;const t=[];
     if(mode!=='everyone'){t.push(`<text x="${n.x+9}" y="${y}" font-size="7.5" letter-spacing=".6" fill="#86602F" font-weight="600">${escX(r.l.toUpperCase())}</text>`);y+=12;}
     for(const s of nm){t.push(`<text x="${n.x+9}" y="${y}" font-family="Literata,Georgia,serif" font-size="11" fill="${inlaw?'#5d564e':'#24211D'}">${escX(s)}</text>`);y+=12.5;}
+    if(p.aka&&y<n.y+CH-14){t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" font-style="italic" fill="#756D63">aka ${escX(p.aka)}</text>`);y+=10.5;}
     for(const s of ds){if(y>n.y+CH-4)break;t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" fill="#756D63">${escX(s)}</text>`);y+=10.5;}
     const dash=p.placeholder||ci?.kind==='married';const ms=S.colorBy==='line'&&ci?.kind==='married'&&LC[ci.line]?LC[ci.line]:stroke;
     out.push(`<g><rect x="${n.x}" y="${n.y}" width="${CW}" height="${CH}" rx="6" fill="${fill}" stroke="${ms}" stroke-width="${n.id===F?1.6:1}"${dash?' stroke-dasharray="3 2"':''}/>${stripe?`<rect x="${n.x+0.5}" y="${n.y+0.5}" width="4" height="${CH-1}" rx="2" fill="${stripe}"/>`:''}${t.join('')}</g>`);}
@@ -455,7 +458,7 @@ async function apply(op){const db=S.db;
 }
 
 /* ---------- panel ---------- */
-const FIELD_LABEL={first:'First name',middle:'Middle name',last:'Last name',bornPlace:'Birthplace',diedPlace:'Place of death',buriedPlace:'Cemetery location',residence:'Lives in',jobs:'Work history',hsSchool:'High school',hsYear:'Graduated',colSchool:'College',colDegree:'Degree',colYear:'Graduated',gradSchool:'Graduate school',gradDegree:'Degree',gradYear:'Graduated',eduOther:'Other education',occupation:'Occupation',education:'Education & degrees',name:'Name',g:'Gender',maiden:'Birth surname',nick:'Nickname',born:'Born',bornPlace:'Birthplace',bornHospital:'Birth hospital',died:'Died',diedPlace:'Place of death',buried:'Buried',deceased:'Deceased',notes:'Notes'};
+const FIELD_LABEL={aka:'Also known as',showNick:'Show nickname on tree',first:'First name',middle:'Middle name',last:'Last name',bornPlace:'Birthplace',diedPlace:'Place of death',buriedPlace:'Cemetery location',residence:'Lives in',jobs:'Work history',hsSchool:'High school',hsYear:'Graduated',colSchool:'College',colDegree:'Degree',colYear:'Graduated',gradSchool:'Graduate school',gradDegree:'Degree',gradYear:'Graduated',eduOther:'Other education',occupation:'Occupation',education:'Education & degrees',name:'Name',g:'Gender',maiden:'Birth surname',nick:'Nickname',born:'Born',bornPlace:'Birthplace',bornHospital:'Birth hospital',died:'Died',diedPlace:'Place of death',buried:'Buried',deceased:'Deceased',notes:'Notes'};
 function setTab(t){S.tab=t;['person','rel','review'].forEach(x=>$('tab-'+x).setAttribute('aria-selected',String(x===t)));renderPanel();}
 $('tab-person').onclick=()=>setTab('person');$('tab-rel').onclick=()=>setTab('rel');$('tab-review').onclick=()=>setTab('review');
 $('closeSheet').onclick=()=>$('aside').classList.add('closed');
@@ -697,7 +700,10 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
     h('label',null,'Married',dateField({id:'f-umarried'},'')),h('label',null,'Divorced (if divorced)',dateField({id:'f-udivorced'},'')));
   const f=h('form',{class:'edit'},h('div',{class:'p-head'},back,h('h2',{text:isNew?'Add '+(ed.rel==='child'?'a child':'a '+ed.rel)+' of '+firstName(p.id):(sugg?'Suggest a correction':'Edit '+firstName(p.id))})),
     h('div',{class:'row'},h('label',null,'First name',h('input',{id:'f-first',value:src.first||'',autocomplete:'off'})),h('label',null,'Middle name',h('input',{id:'f-middle',value:src.middle||'',autocomplete:'off'}))),
-    h('div',{class:'row'},h('label',null,'Last name',h('input',{id:'f-last',value:src.last||'',autocomplete:'off'})),h('label',null,'Nickname (shown on the tree)',h('input',{id:'f-nick',value:src.nick||'',autocomplete:'off',placeholder:'e.g. Bud'}))),
+    h('div',{class:'row'},h('label',null,'Last name',h('input',{id:'f-last',value:src.last||'',autocomplete:'off'})),h('label',null,'Also known as',h('input',{id:'f-aka',value:src.aka||'',autocomplete:'off',placeholder:'Other names, e.g. Clara'}))),
+    h('fieldset',{class:'edu'},h('legend',{text:'Nickname'}),
+      h('input',{id:'f-nick',value:src.nick||'',autocomplete:'off',placeholder:'e.g. Bud','aria-label':'Nickname'}),
+      h('label',{class:'check'},h('input',{type:'checkbox',id:'f-shownick',checked:src.showNick!==false}),'Show the nickname on the tree')),
     (!isNew&&!src.first&&!src.last)?h('p',{class:'q',style:'margin:0;font-size:12px',text:'Currently listed as “'+(src.name||'')+'”. Fill in the name fields to replace it.'}):null,
     h('div',{class:'row'},h('label',null,'Gender',h('select',{id:'f-g'},[['','Not set'],['f','Female'],['m','Male']].map(([v,t])=>h('option',{value:v,selected:(src.g||'')===v},t)))),inp('maiden','Maiden or birth name')),
     h('label',null,'Born',dateField({id:'f-born'},src.born)),inp('bornHospital','Hospital, if known'),
@@ -716,9 +722,10 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
     ...extra,
     h('button',{class:'btn primary',type:'submit',text:sugg?'Send for review':'Save'}));
   f.onsubmit=async e=>{e.preventDefault();const data={};
-    for(const k of['first','middle','last','g','maiden','nick','born','bornHospital','hsSchool','hsYear','colSchool','colDegree','colYear','gradSchool','gradDegree','gradYear','eduOther','died','buried','notes']){const v=$('f-'+k).value.trim();if(isNew?v:v!==(src[k]||''))data[k]=v;}
+    for(const k of['first','middle','last','aka','g','maiden','nick','born','bornHospital','hsSchool','hsYear','colSchool','colDegree','colYear','gradSchool','gradDegree','gradYear','eduOther','died','buried','notes']){const v=$('f-'+k).value.trim();if(isNew?v:v!==(src[k]||''))data[k]=v;}
     for(const k of['bornPlace','residence','diedPlace','buriedPlace']){const v=readLoc(k);if(isNew?v:!sameLoc(v,src[k]||''))data[k]=v;}
     const jobs=[...jobList.querySelectorAll('.job')].map(r=>({company:r.querySelector('.j-company').value.trim(),role:r.querySelector('.j-role').value.trim(),from:r.querySelector('.j-from').value.trim(),to:r.querySelector('.j-to').value.trim()})).filter(j=>j.company||j.role).map(j=>Object.fromEntries(Object.entries(j).filter(([,v])=>v)));
+    {const sn=$('f-shownick').checked;if(isNew?!sn:sn!==(src.showNick!==false))data.showNick=sn;}
     {const nf=$('f-first').value.trim(),nm=$('f-middle').value.trim(),nl=$('f-last').value.trim();const full=joinName(nf,nm,nl);
       if(full&&full!==src.name)data.name=full;}
     const oldJobs=Array.isArray(src.jobs)?src.jobs:(src.occupation?[{role:src.occupation}]:[]);
