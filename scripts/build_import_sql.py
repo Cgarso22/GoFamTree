@@ -15,7 +15,8 @@ for coll in ('people', 'unions', 'contacts', 'hiddencontacts'):
     if not d.exists(): continue
     for f in sorted(d.glob('*.json')):
         doc = json.loads(f.read_text()); data = doc.get('data', doc)
-        out.append(f"insert into family_docs(family_id, collection, doc_id, data) select id, {q(coll)}, {q(doc.get('id', f.stem))}, {q(json.dumps(data))}::jsonb from fam;")
+        target = 'hiddencontacts' if coll == 'contacts' else coll   # contact details start out private
+        out.append(f"insert into family_docs(family_id, collection, doc_id, data) select id, {q(target)}, {q(doc.get('id', f.stem))}, {q(json.dumps(data))}::jsonb from fam;")
         n += 1
 out.append("update family_members set person_id = 'chad-garson' where family_id = (select id from fam) and role = 'owner';")
 out.append("commit;")

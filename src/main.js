@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import './tree.css';
 import './site.css';
-import { startTree } from './tree.js';
+import { startTree, refreshPanel } from './tree.js';
 
 const SB_URL = import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -38,7 +38,8 @@ const sb = createClient(SB_URL, SB_KEY, { auth: { persistSession: true, detectSe
 // keep an invite token across the sign-in round trip
 const params = new URLSearchParams(location.search);
 try { if (params.get('invite')) localStorage.setItem('gft-invite', params.get('invite')); } catch (e) {}
-if (params.get('invite')) history.replaceState(null, '', location.pathname + location.hash);
+try { if (params.get('request')) localStorage.setItem('gft-request', params.get('request')); } catch (e) {}
+if (params.get('invite') || params.get('request')) history.replaceState(null, '', location.pathname + location.hash);
 const pendingInvite = () => { try { return localStorage.getItem('gft-invite'); } catch (e) { return null; } };
 const clearInvite = () => { try { localStorage.removeItem('gft-invite'); } catch (e) {} };
 
@@ -146,7 +147,9 @@ function openFamily(m, mems) {
       return Object.fromEntries((data || []).map(p => [p.id, p.display_name || ''])); },
     canManage, canContribute: rank(m.role) >= 2, uid, myPersonId: m.person_id,
     addSelf: () => addSelf(fid, uid),
+    contactActions: pid => contactActions(pid),
   });
+  initContacts(fid, uid);
 }
 
 async function addSelf(fid, uid) {
@@ -330,12 +333,12 @@ async function familyModal(fid, myRole) {
   const [{ data: mems }, { data: invs }, { data: ppl }] = await Promise.all([
     sb.from('family_members').select('user_id, role, person_id').eq('family_id', fid),
     sb.from('invites').select('id, email, role, person_id, token, accepted_at, created_at').eq('family_id', fid).order('created_at', { ascending: false }),
-    sb.from('family_docs').select('doc_id, data->>name').eq('family_id', fid).eq('collection', 'people'),
+    sb.from('family_docs').select('doc_id, data').eq('family_id', fid).eq('collection', 'people'),
   ]);
   const ids = (mems || []).map(m => m.user_id);
   const { data: profs } = ids.length ? await sb.from('profiles').select('id, display_name').in('id', ids) : { data: [] };
   const pname = Object.fromEntries((profs || []).map(p => [p.id, p.display_name]));
-  const people = (ppl || []).map(p => ({ id: p.doc_id, name: p.name || p.doc_id })).sort((a, b) => a.name.localeCompare(b.name));
+  const people = (ppl || []).map(p => ({ id: p.doc_id, name: p.data?.name || p.doc_id })).sort((a, b) => a.name.localeCompare(b.name));
   const nameOf = pid => people.find(p => p.id === pid)?.name;
   const isOwner = myRole === 'owner';
 
@@ -400,6 +403,180 @@ function accountModal(m, mems) {
   modal(h('h2', { text: 'Account' }),
     h('p', { class: 'm-sub', text: 'Signed in as ' + session.user.email + ' · ' + m.role }),
     switcher,
-    h('div', { class: 'row', style: 'margin-top:14px' },
+    h('div', { class: 'row', style: 'margin-top:14px;gap:8px;display:flex;flex-wrap:wrap' },
+      h('button', { class: 'btn', text: 'My contact info', onclick: () => myContactModal() }),
       h('button', { class: 'btn', text: 'Sign out', onclick: () => sb.auth.signOut() })));
+}
+
+// ---------- contact requests ----------
+// Members' phone, email and address stay private. A relative asks to exchange contact info;
+// the other person gets an email from GoFamTree and picks what (if anything) to share back.
+const CR = { fid: null, uid: null, members: new Map(), reqs: [], mine: null, names: new Map() };
+const FIELDS = [['email', 'Email', 'email'], ['phone', 'Phone', 'tel'], ['address', 'Mailing address', 'text']];
+
+async function initContacts(fid, uid) {
+  CR.fid = fid; CR.uid = uid;
+  await loadContacts();
+  sb.channel('requests-' + uid).on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' },
+    () => loadContacts().then(refreshPanel)).subscribe();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadContacts().then(refreshPanel); });
+  refreshPanel();
+  let rid = null; try { rid = localStorage.getItem('gft-request'); localStorage.removeItem('gft-request'); } catch (e) {}
+  if (rid) openRequestLink(rid);
+}
+async function loadContacts() {
+  const [{ data: mems }, { data: reqs }] = await Promise.all([
+    sb.from('family_members').select('user_id, person_id').eq('family_id', CR.fid),
+    sb.from('contact_requests').select('*').eq('family_id', CR.fid).order('created_at', { ascending: false }),
+  ]);
+  CR.members = new Map((mems || []).filter(m => m.person_id).map(m => [m.person_id, m.user_id]));
+  CR.reqs = reqs || [];
+}
+const personOfUser = u => [...CR.members].find(([, v]) => v === u)?.[0];
+async function displayName(userId) {
+  if (CR.names.has(userId)) return CR.names.get(userId);
+  let name = '';
+  const pid = personOfUser(userId);
+  if (pid) { const { data } = await sb.from('family_docs').select('data').eq('family_id', CR.fid).eq('collection', 'people').eq('doc_id', pid).maybeSingle(); name = data?.data?.name || ''; }
+  if (!name) { const { data } = await sb.from('profiles').select('display_name').eq('id', userId).maybeSingle(); name = data?.display_name || 'A family member'; }
+  CR.names.set(userId, name); return name;
+}
+const first = n => (n || '').split(' ')[0] || n;
+
+async function myContact() {
+  if (CR.mine) return CR.mine;
+  const { data } = await sb.from('member_contacts').select('email, phone, address').eq('user_id', CR.uid).maybeSingle();
+  let c = data || {};
+  if (!data) { // first time: start from what's in the tree, if anything
+    const pid = personOfUser(CR.uid);
+    if (pid) { const { data: d } = await sb.from('family_docs').select('collection, data').eq('family_id', CR.fid).eq('doc_id', pid).in('collection', ['contacts', 'hiddencontacts']);
+      const t = (d || [])[0]?.data || {};
+      c = { email: t.email || '', phone: t.phone || '', address: [t.street, t.addr, t.zip].filter(Boolean).join(', ') }; }
+    if (!c.email) c.email = session.user.email;
+  }
+  return (CR.mine = c);
+}
+async function saveMyContact(c) {
+  CR.mine = c;
+  await sb.from('member_contacts').upsert({ user_id: CR.uid, ...c, updated_at: new Date().toISOString() });
+}
+
+// what someone has shared with me, from any accepted request in either direction
+function sharedBy(otherUid) {
+  const out = {};
+  for (const r of CR.reqs) {
+    if (r.status === 'accepted' && r.from_user === CR.uid && r.to_user === otherUid) Object.assign(out, r.shared || {});
+    if (r.status === 'accepted' && r.from_user === otherUid && r.to_user === CR.uid) Object.assign(out, r.offered || {});
+  }
+  return out;
+}
+function infoList(c) {
+  const rows = FIELDS.filter(([k]) => c[k]).map(([k, label]) => h('div', { class: 'cr-line' }, h('span', { class: 'm-sub', text: label }), h('span', { text: c[k] }),
+    h('button', { type: 'button', class: 'btn ghost small', text: 'Copy', onclick: () => copy(c[k]) })));
+  return rows.length ? h('div', { class: 'cr-info' }, rows) : null;
+}
+
+function contactActions(pid) {
+  const other = CR.members.get(pid);
+  if (!CR.uid || !other) return null;
+  const box = h('div', { class: 'cr-box' });
+  if (other === CR.uid) {
+    box.append(h('p', { class: 'm-sub', text: 'Your email, phone and address stay private. Relatives can ask to exchange contact info, and you choose what to share.' }),
+      h('button', { class: 'btn small', text: 'My contact info', onclick: () => myContactModal() }));
+    return box;
+  }
+  const incoming = CR.reqs.find(r => r.status === 'pending' && r.from_user === other && r.to_user === CR.uid);
+  const outgoing = CR.reqs.find(r => r.status === 'pending' && r.from_user === CR.uid && r.to_user === other);
+  const shared = sharedBy(other);
+  const list = infoList(shared);
+  if (list) box.append(h('p', { class: 'm-sub', text: 'Shared with you' }), list);
+  if (incoming) box.append(h('p', { class: 'cr-note', text: 'They asked to exchange contact info with you.' }),
+    h('button', { class: 'btn primary small', text: 'Respond', onclick: () => respondModal(incoming) }));
+  else if (outgoing) box.append(h('p', { class: 'm-sub', text: 'Request sent. They’ll get an email and choose what to share.' }),
+    h('button', { class: 'btn ghost small', text: 'Withdraw request', onclick: async () => {
+      await sb.from('contact_requests').delete().eq('id', outgoing.id); await loadContacts(); refreshPanel(); toast('Request withdrawn'); } }));
+  else box.append(h('button', { class: 'btn small', text: list ? 'Ask for more contact info' : 'Ask to exchange contact info', onclick: () => requestModal(pid, other) }));
+  return box;
+}
+
+// checkboxes + editable fields for what I'm willing to share
+function shareFields(mine, defaults) {
+  const rows = FIELDS.map(([k, label, type]) => {
+    const cb = h('input', { type: 'checkbox', checked: !!(defaults[k] && mine[k]) });
+    const inp = type === 'text' ? h('textarea', { rows: '2', placeholder: 'Street, city, state, ZIP' }) : h('input', { type, placeholder: label });
+    inp.value = mine[k] || ''; inp.oninput = () => { cb.checked = !!inp.value.trim(); };
+    return { k, cb, inp, el: h('div', { class: 'cr-field' }, h('label', { class: 'check' }, cb, label), inp) };
+  });
+  const read = () => { const share = {}, all = {}; for (const r of rows) { const v = r.inp.value.trim(); all[r.k] = v; if (r.cb.checked && v) share[r.k] = v; } return { share, all }; };
+  return { el: h('div', { class: 'cr-fields' }, rows.map(r => r.el)), read };
+}
+
+async function requestModal(pid, other) {
+  const name = await displayName(other);
+  const mine = await myContact();
+  const sf = shareFields(mine, { email: true, phone: true });
+  const note = h('textarea', { rows: '3', maxlength: '500', placeholder: 'Add a note (optional), e.g. “It’s your cousin Chad. Would love to catch up!”' });
+  const send = h('button', { class: 'btn primary', type: 'submit', text: 'Send request' });
+  const form = h('form', { class: 'gate-form' },
+    h('p', { class: 'gate-note', text: `${first(name)} will get an email from GoFamTree asking to exchange contact info. They choose what to share back, or decline.` }),
+    h('label', null, 'Note', note),
+    h('h3', { text: 'What you’ll share with ' + first(name) }), sf.el,
+    h('p', { class: 'm-sub', text: 'They see this only if they accept.' }), send);
+  form.onsubmit = async e => { e.preventDefault(); send.disabled = true;
+    const { share, all } = sf.read(); await saveMyContact(all);
+    const { data, error } = await sb.from('contact_requests').insert({ family_id: CR.fid, to_user: other, note: note.value.trim() || null, offered: share }).select('id').single();
+    if (error) { toast(error.message.includes('one_open') ? 'You already have a request waiting with them.' : error.message); send.disabled = false; return; }
+    const { error: mailErr } = await sb.functions.invoke('contact-email', { body: { request_id: data.id, kind: 'request' } });
+    closeModal(); await loadContacts(); refreshPanel();
+    toast(mailErr ? 'Request saved. They’ll see it next time they sign in.' : 'Request sent to ' + first(name));
+  };
+  modal(h('h2', { text: 'Contact ' + name }), form);
+}
+
+async function respondModal(r) {
+  const name = await displayName(r.from_user);
+  const mine = await myContact();
+  const sf = shareFields(mine, { email: true });
+  const msg = h('p', { class: 'gate-msg', role: 'status' });
+  const answer = async accept => {
+    const { share, all } = sf.read();
+    if (accept && !Object.keys(share).length) { msg.textContent = 'Check at least one thing to share, or decline.'; return; }
+    await saveMyContact(all);
+    const { error } = await sb.rpc('respond_contact_request', { req: r.id, accept, share: accept ? share : null });
+    if (error) { msg.textContent = error.message; return; }
+    if (accept) await sb.functions.invoke('contact-email', { body: { request_id: r.id, kind: 'response' } });
+    closeModal(); await loadContacts(); refreshPanel();
+    toast(accept ? 'Shared with ' + first(name) : 'Declined. They won’t see any of your info.');
+  };
+  modal(h('h2', { text: name + ' would like to exchange contact info' }),
+    r.note ? h('blockquote', { class: 'cr-quote', text: r.note }) : null,
+    h('h3', { text: 'Choose what to share with ' + first(name) }), sf.el,
+    h('p', { class: 'm-sub', text: 'Only ' + first(name) + ' will see what you check. Nothing is shared if you decline.' }), msg,
+    h('div', { class: 'row', style: 'display:flex;gap:8px;flex-wrap:wrap' },
+      h('button', { class: 'btn primary', text: 'Accept and share', onclick: () => answer(true) }),
+      h('button', { class: 'btn', text: 'Decline', onclick: () => answer(false) })),
+    Object.keys(r.offered || {}).length ? h('p', { class: 'm-sub', text: `If you accept, you’ll also see what ${first(name)} offered to share.` }) : null);
+}
+
+async function myContactModal() {
+  const mine = await myContact();
+  const inputs = FIELDS.map(([k, label, type]) => { const i = type === 'text' ? h('textarea', { rows: '2' }) : h('input', { type }); i.value = mine[k] || ''; return [k, label, i]; });
+  const form = h('form', { class: 'gate-form' },
+    h('p', { class: 'gate-note', text: 'Kept private. It fills in automatically when you accept a contact request, and you still choose each time what to share.' }),
+    ...inputs.map(([, label, i]) => h('label', null, label, i)),
+    h('button', { class: 'btn primary', type: 'submit', text: 'Save' }));
+  form.onsubmit = async e => { e.preventDefault(); await saveMyContact(Object.fromEntries(inputs.map(([k, , i]) => [k, i.value.trim()]))); closeModal(); toast('Saved'); };
+  modal(h('h2', { text: 'My contact info' }), form);
+}
+
+async function openRequestLink(id) {
+  const { data: r } = await sb.from('contact_requests').select('*').eq('id', id).maybeSingle();
+  if (!r) { toast('That request is no longer available.'); return; }
+  if (r.family_id !== CR.fid) { try { localStorage.setItem('gft-family', r.family_id); localStorage.setItem('gft-request', id); } catch (e) {} location.reload(); return; }
+  const otherPid = personOfUser(r.to_user === CR.uid ? r.from_user : r.to_user);
+  if (otherPid) location.hash = encodeURIComponent(otherPid);
+  if (r.to_user === CR.uid && r.status === 'pending') respondModal(r);
+  else if (r.to_user === CR.uid) toast('You already answered this request.');
+  else if (r.status === 'accepted') toast('They shared their contact info. It’s on their page.');
+  else if (r.status === 'pending') toast('Still waiting for them to answer.');
 }

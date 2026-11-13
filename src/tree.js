@@ -307,7 +307,8 @@ function renderPanel(){const panel=$('panel');panel.replaceChildren();
   if(!(p.deceased||p.died)){const vis=S.contacts.get(id),hid=S.isOwner?S.hiddenContacts.get(id):null;const c=vis||hid;
     const csec=h('div',{class:'sec'},h('h3',{text:'Contact'}));
     if(c){if(hid&&!vis)csec.append(h('div',{class:'note',style:'margin-bottom:8px',text:'Private: only you can see this. It’s hidden from everyone else.'}));csec.append(contactBlock(c)||h('p',{class:'q',style:'margin:0',text:'No details yet.'}));}
-    else csec.append(h('p',{class:'q',style:'margin:0',text:'No contact details shared.'}));
+    else csec.append(h('p',{class:'q',style:'margin:0',text:'No contact details shown here.'}));
+    const extra=CTX.contactActions?.(id);if(extra)csec.append(extra);
     if(mode()!=='view')csec.append(h('div',{class:'p-actions'},h('button',{class:'btn small',onclick:()=>{S.editing={type:'contact'};renderPanel();},text:c?'Update contact info':'Add contact info'})));
     panel.append(csec);}
   // marriages
@@ -444,7 +445,7 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
       else{const o=read('e0');const old=list[0].ph;for(const k of['age','year','milestone','caption'])if(!o[k]&&old[k])o[k]='';await commit({kind:'updatePhoto',personId:p.id,assetId:ed.id,photo:{id:ed.id,...o}});}
       S.editing=null;renderPanel();};
     return panel.append(f);}
-  if(ed.type==='contact'){const vis=S.contacts.get(p.id),hid=S.isOwner?S.hiddenContacts.get(p.id):null;const c=vis||hid||{};const shown=!!vis||!hid;
+  if(ed.type==='contact'){const vis=S.contacts.get(p.id),hid=S.isOwner?S.hiddenContacts.get(p.id):null;const c=vis||hid||{};const shown=!!vis;
     const f=h('form',{class:'edit'},h('div',{class:'p-head'},back,h('h2',{text:'Contact info · '+firstName(p.id)})),
       h('label',null,'Street address',h('input',{id:'c-street',value:c.street||'',autocomplete:'street-address',placeholder:'e.g. 123 Main St, Apt 4'})),
       locInput('caddr','City, state, country',c.addr||''),
@@ -593,6 +594,7 @@ function refresh(){if(!S.loaded.p||!S.loaded.u)return;
   if(!S.focus||!P(S.focus)){const hid=decodeURIComponent(location.hash.slice(1));S.focus=P(hid)?hid:(P(CTX.myPersonId)?CTX.myPersonId:S.people.keys().next().value);S.sel=S.focus;renderTree(true);if(innerWidth>820)openSheet();}
   else renderTree(false);
   renderPanel();}
+export function refreshPanel(){renderPanel();}
 export function startTree(ctx){
   CTX=ctx; const db=ctx.db; S.db=db; S.assets=ctx.assets; S.downloads=ctx.downloads; S.dictation=ctx.dictation;
   S.isOwner=ctx.canManage; S.uid=ctx.uid; S.canWrite=ctx.canContribute;

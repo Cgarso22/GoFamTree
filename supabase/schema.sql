@@ -206,3 +206,74 @@ begin
    where family_id = fam and collection = coll and doc_id = did;
   if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
 end $$;
+
+-- ---------- private contact info & contact requests ----------
+-- Each member's own contact details. Only they can read it; it's shared one request at a time.
+create table if not exists member_contacts (
+  user_id uuid primary key references auth.users on delete cascade,
+  email text, phone text, address text,
+  updated_at timestamptz not null default now()
+);
+alter table member_contacts enable row level security;
+drop policy if exists mc_self on member_contacts;
+create policy mc_self on member_contacts for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table if not exists contact_requests (
+  id uuid primary key default gen_random_uuid(),
+  family_id uuid not null references families on delete cascade,
+  from_user uuid not null default auth.uid() references auth.users on delete cascade,
+  to_user uuid not null references auth.users on delete cascade,
+  note text check (char_length(note) <= 500),
+  offered jsonb not null default '{}',        -- what the requester chose to share
+  shared jsonb,                               -- what the other person chose to share back
+  status text not null default 'pending' check (status in ('pending','accepted','declined')),
+  created_at timestamptz not null default now(),
+  responded_at timestamptz,
+  request_emailed_at timestamptz,
+  response_emailed_at timestamptz,
+  check (from_user <> to_user)
+);
+create unique index if not exists contact_requests_one_open on contact_requests(family_id, from_user, to_user) where status = 'pending';
+alter table contact_requests enable row level security;
+drop policy if exists cr_read on contact_requests;
+create policy cr_read on contact_requests for select using (from_user = auth.uid() or to_user = auth.uid());
+drop policy if exists cr_create on contact_requests;
+create policy cr_create on contact_requests for insert with check (
+  from_user = auth.uid() and status = 'pending' and shared is null and responded_at is null
+  and request_emailed_at is null and response_emailed_at is null
+  and has_role(family_id, 'viewer')
+  and exists (select 1 from family_members m where m.family_id = contact_requests.family_id and m.user_id = contact_requests.to_user));
+drop policy if exists cr_withdraw on contact_requests;
+create policy cr_withdraw on contact_requests for delete using (from_user = auth.uid() and status = 'pending');
+
+-- no more than 20 requests a day per person
+create or replace function contact_request_limit() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if (select count(*) from contact_requests where from_user = new.from_user and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'Too many contact requests today. Try again tomorrow.';
+  end if;
+  return new;
+end $$;
+drop trigger if exists contact_request_limit on contact_requests;
+create trigger contact_request_limit before insert on contact_requests for each row execute function contact_request_limit();
+
+-- the person asked answers: accept (choosing what to share) or decline
+create or replace function respond_contact_request(req uuid, accept boolean, share jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare r contact_requests;
+begin
+  select * into r from contact_requests where id = req;
+  if r.id is null or r.to_user <> auth.uid() then raise exception 'This request isn’t yours to answer.'; end if;
+  if r.status <> 'pending' then raise exception 'You already answered this request.'; end if;
+  update contact_requests set
+    status = case when accept then 'accepted' else 'declined' end,
+    shared = case when accept then (select coalesce(jsonb_object_agg(key, value), '{}') from jsonb_each(coalesce(share,'{}'))
+                                    where key in ('email','phone','address') and jsonb_typeof(value) = 'string' and length(value #>> '{}') between 1 and 300)
+             else null end,
+    responded_at = now()
+  where id = req;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table contact_requests;
+exception when others then null; end $$;

@@ -32,3 +32,15 @@
 .m-role{font-size:12px;color:var(--muted);text-transform:capitalize}
 .linkbox{display:flex;flex-direction:column;gap:6px;background:var(--accent-soft);border-radius:10px;padding:10px}
 .linkbox .row{display:flex;gap:6px}
+.cr-box{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px}
+.cr-box .m-sub{margin:0}
+.cr-note{margin:0;font-size:13px;color:var(--accent);font-weight:500}
+.cr-info{display:flex;flex-direction:column;gap:4px;width:100%}
+.cr-line{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:14px}
+.cr-line span{min-width:0;overflow-wrap:anywhere}
+.cr-fields{display:flex;flex-direction:column;gap:10px}
+.cr-field{display:flex;flex-direction:column;gap:4px}
+#modalCard .check{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:14px;font-weight:500}
+#modalCard .check input{width:auto}
+#modalCard textarea{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;color:var(--ink);width:100%;box-sizing:border-box;resize:vertical;font:inherit}
+.cr-quote{margin:0;padding:8px 12px;border-left:3px solid var(--wood-line);background:var(--accent-soft);border-radius:0 8px 8px 0;font-size:14px}
