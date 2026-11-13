@@ -369,14 +369,28 @@ async function familyModal(fid, myRole) {
   role.onchange = () => help.textContent = ROLE_HELP[role.value];
   const person = h('select', null, h('option', { value: '' }, 'Choose who they are (optional)'), ...people.map(p => h('option', { value: p.id }, p.name)));
   const out = h('div');
+  const note = h('textarea', { rows: '3', maxlength: '600', placeholder: 'Add a personal note (optional), e.g. “Hi Aunt Terry! I’m building our family tree. Would love your help filling in your side.”' });
+  const sendIt = h('input', { type: 'checkbox', checked: true });
+  const submit = h('button', { class: 'btn primary', type: 'submit', text: 'Send invite' });
+  sendIt.onchange = () => { submit.textContent = sendIt.checked ? 'Send invite' : 'Create invite link'; note.parentElement.hidden = !sendIt.checked; };
   const form = h('form', { class: 'gate-form' }, h('label', null, 'Email', email), h('label', null, 'Access', role), help,
     h('label', null, 'Who they are in the tree', person),
-    h('button', { class: 'btn primary', type: 'submit', text: 'Create invite link' }), out);
-  form.onsubmit = async e => { e.preventDefault();
-    const { data, error } = await sb.from('invites').insert({ family_id: fid, email: email.value.trim().toLowerCase(), role: role.value,
-      person_id: person.value || null, invited_by: session.user.id }).select('token').single();
-    if (error) { out.replaceChildren(h('p', { class: 'gate-msg', text: error.message })); return; }
-    out.replaceChildren(linkBox(inviteUrl(data.token), 'Send this link to ' + email.value.trim() + '. It works once.'));
+    h('label', { class: 'check' }, sendIt, 'Email the invite to them from GoFamTree'),
+    h('label', null, 'Personal note', note),
+    submit, out);
+  form.onsubmit = async e => { e.preventDefault(); submit.disabled = true;
+    const to = email.value.trim();
+    const { data, error } = await sb.from('invites').insert({ family_id: fid, email: to.toLowerCase(), role: role.value,
+      person_id: person.value || null, invited_by: session.user.id }).select('id, token').single();
+    if (error) { out.replaceChildren(h('p', { class: 'gate-msg', text: error.message })); submit.disabled = false; return; }
+    if (sendIt.checked) {
+      const err = await emailInvite(data.id, note.value);
+      out.replaceChildren(err
+        ? linkBox(inviteUrl(data.token), 'The email didn’t go out (' + err + '). Copy this link and send it to ' + to + ' yourself. It works once.')
+        : h('p', { class: 'cr-note', text: 'Invite emailed to ' + to + '. They’ll get a link to join.' }));
+      if (!err) { email.value = ''; note.value = ''; person.value = ''; toast('Invite sent'); }
+    } else out.replaceChildren(linkBox(inviteUrl(data.token), 'Send this link to ' + to + '. It works once.'));
+    submit.disabled = false;
   };
 
   const openInv = (invs || []).filter(i => !i.accepted_at);
@@ -387,11 +401,20 @@ async function familyModal(fid, myRole) {
     openInv.length ? h('h3', { text: 'Invites not used yet' }) : null,
     openInv.length ? h('div', { class: 'm-list' }, openInv.map(i => h('div', { class: 'm-row' },
       h('div', { class: 'm-who' }, h('strong', { text: i.email }), h('span', { class: 'm-sub', text: i.role + (nameOf(i.person_id) ? ' · ' + nameOf(i.person_id) : '') })),
+      h('button', { class: 'btn small', text: 'Email again', onclick: async e => { e.target.disabled = true; const err = await emailInvite(i.id); toast(err ? 'Didn’t send: ' + err : 'Invite emailed to ' + i.email); e.target.disabled = false; } }),
       h('button', { class: 'btn small', text: 'Copy link', onclick: () => copy(inviteUrl(i.token)) }),
       h('button', { class: 'btn small danger', text: 'Cancel', onclick: async () => { await sb.from('invites').delete().eq('id', i.id); familyModal(fid, myRole); } })))) : null,
   );
 }
 const inviteUrl = t => location.origin + '/?invite=' + t;
+// returns null when sent, or a short reason when it wasn't
+async function emailInvite(id, note) {
+  const { data, error } = await sb.functions.invoke('invite-email', { body: { invite_id: id, note: note || '' } });
+  if (!error && data?.ok) return null;
+  let msg = data?.error;
+  try { if (!msg && error?.context) msg = (await error.context.json()).error; } catch (e) {}
+  return msg || 'email isn’t set up yet';
+}
 async function copy(text) { try { await navigator.clipboard.writeText(text); toast('Link copied'); } catch (e) { window.prompt('Copy this link', text); } }
 function linkBox(url, note) {
   const inp = h('input', { type: 'text', readonly: true, value: url, onclick: e => e.target.select() });

@@ -20,3 +20,7 @@ A private family tree at gofamtree.com. Relatives sign in, open the tree centere
 3. Run `npm install`, then `npm run dev`.
 4. In Vercel, import the repo and add the same two env vars.
 5. Bring in the existing family: `python3 scripts/build_import_sql.py data-export OWNER_EMAIL > supabase/import.sql`. Run it in the SQL editor after the owner has signed up.
+
+## Email
+Invite and contact-request emails go out through Resend from Supabase Edge Functions (`invite-email`, `contact-email`).
+Secrets on the Supabase project: `RESEND_API_KEY` (required), `MAIL_FROM` (default `GoFamTree <hello@gofamtree.com>`), `SITE_URL` (default `https://www.gofamtree.com`).
