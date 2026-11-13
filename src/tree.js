@@ -372,11 +372,12 @@ function classify(F){const AF=ancMap(F);const gps=[];for(const p of parentsOf(F)
   const gpAnc=slot.map(([g,n])=>[n,new Set(ancMap(g).keys())]);
   const lineOfAnc=a=>{for(const[n,set]of gpAnc)if(set.has(a))return n;return 0;};
   const desc=new Set();const q=[F];while(q.length){const c=q.shift();for(const k of childrenOf(c))if(!desc.has(k)){desc.add(k);q.push(k);}}
-  const out=new Map();
+  const out=new Map();const sibSet=new Set(siblingsOf(F));
   for(const id of S.people.keys()){
     if(id===F){out.set(id,{kind:'self',line:0});continue;}
     if(AF.has(id)){out.set(id,{kind:'direct',line:AF.get(id)<=1?0:lineOfAnc(id)});continue;}
     if(desc.has(id)){out.set(id,{kind:'direct',line:0});continue;}
+    if(sibSet.has(id)){out.set(id,{kind:'direct',line:0});continue;} // brothers and sisters count as immediate family
     const A=ancMap(id);let best=null;for(const[a,d]of A)if(AF.has(a)){const dd=AF.get(a);if(!best||dd<best.d||(dd===best.d&&lineOfAnc(a)<lineOfAnc(best.a)))best={a,d:dd};}
     if(best)out.set(id,{kind:'blood',line:best.d<=1?0:lineOfAnc(best.a)});}
   // people who married in take the color of the relative they married
@@ -390,7 +391,7 @@ function renderLegend(slot){const el=$('legend');if(!el)return;
   sel.onchange=()=>{S.colorBy=sel.value;try{localStorage.setItem('gft-color',S.colorBy);}catch(e){}renderTree(false);};
   const item=(cls,label)=>h('div',{class:'lg-i'},h('span',{class:'lg-sw '+cls}),label);
   let rows=[];
-  if(S.colorBy==='relation')rows=[item('sw-direct','Direct line: parents, grandparents, children'),item('sw-blood','Blood relatives: siblings, aunts, uncles, cousins'),item('sw-married','Married into the family')];
+  if(S.colorBy==='relation')rows=[item('sw-direct','Immediate family and direct line: parents, grandparents, brothers, sisters, children'),item('sw-blood','Other blood relatives: aunts, uncles, cousins, nieces, nephews'),item('sw-married','Married into the family')];
   else if(S.colorBy==='line'){rows=[item('sw-l0',firstName(S.focus)+'’s own family'),...slot.map(([g,n])=>item('sw-l'+n,lineName(g)+' line')),item('sw-married','Married in (outline shows whose family)')];}
   el.replaceChildren(sel,...rows);el.hidden=false;}
 
