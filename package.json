@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.14",
     "@supabase/supabase-js": "^2.45.4"
   },
   "devDependencies": {

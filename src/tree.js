@@ -1,7 +1,7 @@
 let CTX=null;
 
-const CW=196, CH=92, GX=22, RH=150, MAXUP=5, MAXDOWN=3;
-const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,tab:'person',editing:null,
+const CW=196, CH=108, GX=22, RH=164, CG=70, RG=14, MAXUP=5, MAXDOWN=3;
+const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),tab:'person',editing:null,
   db:null,user:null,assets:null,downloads:null,isOwner:false,uid:null,canWrite:null,suggest:[],mine:null,names:{}};
 const $=id=>document.getElementById(id);
 function h(tag,props,...kids){const el=document.createElement(tag);if(props)for(const[k,v]of Object.entries(props)){
@@ -15,11 +15,16 @@ const isUnknown=p=>!p||/\?/.test(p.name||'')||p.placeholder;
 const yearOf=s=>{const m=String(s||'').match(/\b(1[6-9]\d\d|20\d\d)\b/);return m?m[1]:null;};
 function lifespan(p){const b=yearOf(p.born),d=yearOf(p.died);
   if(p.deceased||p.died){return (b||'?')+' – '+(d||'?');} return b?'b. '+b:(p.born?'b. '+p.born:'b. ?');}
+const clean=s=>String(s||'').trim();
+function cardDates(p){const b=clean(p.born),d=clean(p.died);
+  if(p.deceased||d)return ['b. '+(b||'?'),'d. '+(d||'?')];return ['b. '+(b||'?')];}
 function initials(n){return String(n||'?').replace(/[“”"()?]/g,'').trim().split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase()||'?';}
 const blob=id=>CTX.url(id);
 const STAGES=[['child','Childhood'],['adult','Adult'],['older','Later in life']];
 const MILESTONES=['Birth','Baby naming / bris','First birthday','First day of school','Bar Mitzvah','Bat Mitzvah','High school graduation','College graduation','Engagement','Wedding','Birth of a child','Military service','New home','Retirement','Anniversary','Family gathering','Holiday'];
 function galleryOf(p){if(Array.isArray(p?.gallery))return p.gallery;const ph=p?.photos||{};return STAGES.filter(([s])=>ph[s]).map(([s])=>({id:ph[s],stage:s}));}
+// where to center a photo when it's cropped to a circle: the face, if we know it
+function facePos(p,id){const g=galleryOf(p).find(x=>x.id===id);const f=g?.face;return f?`${Math.round(f.x)}% ${Math.round(f.y)}%`:'50% 28%';}
 function portraitOf(p){if(p.portrait)return p.portrait;const g=galleryOf(p);return (g.find(x=>x.stage==='adult')||g.find(x=>x.stage==='older')||g[0]||{}).id;}
 function photoAge(p,ph){if(ph.age)return String(ph.age);const by=+yearOf(p.born),y=+ph.year;return by&&y&&y>=by?String(y-by):'';}
 function photoLine(p,ph){const a=photoAge(p,ph);return [a&&('Age ~'+a),ph.year,ph.milestone].filter(Boolean).join(' · ');}
@@ -190,6 +195,47 @@ function layout(F){
   return{nodes,edges,spouseEdges,w:maxX-minX+PAD*2+LBL,h:maxY-minY+PAD*2,y0:-minY+PAD};
 }
 
+/* ---------- left-to-right layouts ---------- */
+// Lays out blocks (a person plus any partners stacked under them) in columns, children to the right.
+function tidyH(roots,blockOf,kidsOf,colOf){
+  const nodes=new Map(),edges=[],spouseEdges=[];let cur=0;const BH=n=>n*(CH+RG)-RG;
+  function place(id){if(nodes.has(id))return null;
+    const blk=blockOf(id,nodes);blk.forEach(x=>nodes.set(x,{id:x,x:0,y:0}));
+    const kids=kidsOf(blk).filter(k=>!nodes.has(k));const start=cur;const rs=kids.map(place).filter(Boolean);
+    const bh=BH(blk.length);let top=rs.length?(rs[0][0]+rs[rs.length-1][1])/2-bh/2:cur;top=Math.max(top,start);
+    blk.forEach((x,i)=>{const n=nodes.get(x);n.y=top+i*(CH+RG);n.x=colOf(x)*(CW+CG);
+      if(i>0){const u=[...S.unions.values()].find(u=>(u.a===blk[0]&&u.b===x)||(u.b===blk[0]&&u.a===x));spouseEdges.push({a:blk[0],b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
+    cur=Math.max(cur,top+bh+RG);return[top,top+bh];}
+  for(const r of roots)place(r);
+  return{nodes,edges,spouseEdges};}
+function finishH(R,colOf,label){
+  const{nodes}=R;let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const n of nodes.values()){minX=Math.min(minX,n.x);minY=Math.min(minY,n.y);maxX=Math.max(maxX,n.x+CW);maxY=Math.max(maxY,n.y+CH);}
+  const PAD=60,TOP=40;for(const n of nodes.values()){n.x+=-minX+PAD;n.y+=-minY+PAD+TOP;}
+  const cols=new Map();for(const n of nodes.values())if(!cols.has(n.x))cols.set(n.x,label(colOf(n.id)));
+  return{...R,horiz:true,cols,w:maxX-minX+PAD*2,h:maxY-minY+PAD*2+TOP};}
+function genMap(){const ids=[...S.people.keys()],g=new Map(ids.map(i=>[i,0]));
+  for(let it=0;it<60;it++){let ch=false;
+    for(const id of ids){let v=g.get(id);for(const p of parentsOf(id))if(g.has(p))v=Math.max(v,g.get(p)+1);
+      for(const s of spousesOf(id))if(g.has(s))v=Math.max(v,g.get(s));
+      if(!parentsOf(id).length){const ks=childrenOf(id).filter(k=>g.has(k));if(ks.length)v=Math.max(v,Math.min(...ks.map(k=>g.get(k)))-1);}
+      if(v!==g.get(id)){g.set(id,v);ch=true;}}
+    if(!ch)break;}
+  return g;}
+function layoutWhole(F){const g=genMap();const home=P(CTX?.myPersonId)?CTX.myPersonId:F;
+  const anc=[...ancMap(home).keys()].filter(a=>P(a)&&!parentsOf(a).length);
+  const roots=[...new Set([...anc.sort((a,b)=>g.get(a)-g.get(b)),
+    ...[...S.people.keys()].filter(i=>!parentsOf(i).length).sort((a,b)=>g.get(a)-g.get(b)||byBirth(a,b)),...S.people.keys()])];
+  const ord=(id,s)=>unionsOf(id).find(u=>other(u,id)===s)?.order||0;
+  const R=tidyH(roots,
+    (id,placed)=>[id,...spousesOf(id).filter(s=>s!==id&&!placed.has(s)).sort((a,b)=>ord(id,a)-ord(id,b))].filter((x,i,a)=>a.indexOf(x)===i),
+    blk=>[...new Set(blk.flatMap(b=>childrenOf(b)))].sort(byBirth),
+    id=>g.get(id));
+  return finishH(R,id=>g.get(id),c=>c);}
+function layoutPedigree(F){const depth=new Map([[F,0]]);
+  const R=tidyH([F],id=>[id],blk=>{const ps=parentsOf(blk[0]).filter(p=>P(p));const d=depth.get(blk[0])+1;
+      if(d>6)return[];ps.forEach(p=>{if(!depth.has(p))depth.set(p,d);});return ps;},id=>depth.get(id));
+  return finishH(R,id=>depth.get(id),c=>-c);}
 /* ---------- render tree ---------- */
 let L=null, AF=null;
 function rel(id){return relation(S.focus,id,AF);}
@@ -197,25 +243,37 @@ function renderTree(scroll){
   const canvas=$('canvas'),svg=$('links');
   canvas.querySelectorAll('.card,.gen-label').forEach(e=>e.remove());
   if(!S.focus||!P(S.focus)){return;}
-  AF=ancMap(S.focus);L=layout(S.focus);
+  AF=ancMap(S.focus);L=S.view==='whole'?layoutWhole(S.focus):S.view==='pedigree'?layoutPedigree(S.focus):layout(S.focus);
   canvas.style.width=L.w+'px';canvas.style.height=L.h+'px';svg.setAttribute('width',L.w);svg.setAttribute('height',L.h);
   svg.replaceChildren();
   const NS='http://www.w3.org/2000/svg';const pth=(d,cls)=>{const e=document.createElementNS(NS,'path');e.setAttribute('d',d);if(cls)e.setAttribute('class',cls);svg.append(e);};
+  if(L.horiz){
+    for(const n of L.nodes.values()){const ps=parentsOf(n.id).map(p=>L.nodes.get(p)).filter(Boolean);if(!ps.length)continue;
+      const px=Math.max(...ps.map(q=>q.x))+CW,py=ps.reduce((s,q)=>s+q.y+CH/2,0)/ps.length,ky=n.y+CH/2,mx=n.x-CG/2;
+      pth(`M${px} ${py} H${mx} V${ky} H${n.x}`);}
+    for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[t,u]=a.y<b.y?[a,b]:[b,a];
+      pth(`M${t.x+14} ${t.y+CH} V${u.y}`,e.ex?'ex':'');}
+  }
+  else{
   for(const e of L.edges){const kn=L.nodes.get(e.kid);const ps=e.parents.map(p=>L.nodes.get(p)).filter(Boolean);if(!kn||!ps.length)continue;
     const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);
     const kx=kn.x+CW/2,ky=kn.y,my=ky-30;pth(`M${px} ${py} V${my} H${kx} V${ky}`);}
   for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];const y=l.y+CH/2;
     pth(`M${l.x+CW} ${y} H${r.x}`,e.ex?'ex':'');}
+  }
   // generation labels
-  const gens=new Set([...L.nodes.values()].map(n=>n.y));
   const gname=k=>k===0?'Generation of '+firstName(S.focus):k<0?(['Parents','Grandparents','Great-grandparents','2× great-grandparents','3× great-grandparents','4× great-grandparents'][-k-1]||''):(['Children','Grandchildren','Great-grandchildren'][k-1]||'');
+  if(L.horiz){
+    for(const[x,c]of L.cols){
+      canvas.append(h('div',{class:'gen-label',style:`top:62px;left:${x}px`,text:S.view==='pedigree'?(c===0?firstName(S.focus):gname(c)):('Generation '+(c+1))}));}}
+  const gens=L.horiz?new Set():new Set([...L.nodes.values()].map(n=>n.y));
   for(const y of gens){const k=Math.round((y-L.y0)/RH);canvas.append(h('div',{class:'gen-label',style:`top:${y+CH/2-8}px;left:20px`,text:gname(k)}));}
   for(const n of L.nodes.values()){const p=P(n.id);const r=rel(n.id);
     const ph=portraitOf(p);
-    const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}")`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
+    const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}");background-position:${facePos(p,ph)}`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
     const card=h('button',{class:'card'+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
-      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:p.name}),h('div',{class:'dt',text:lifespan(p)})));
+      av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:p.name}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
   applyScale();
   $('centered').replaceChildren('Centered on ',h('b',{text:P(S.focus).name}),' · click a person, then click again to re-center');
@@ -258,7 +316,7 @@ async function commit(op){
 async function apply(op){const db=S.db;
   if(op.kind==='updatePerson')return db.doc('people/'+op.id).update(op.data);
   if(op.kind==='updateUnion')return db.doc('unions/'+op.id).update(op.data);
-  if(op.kind==='setPhoto')return apply({kind:'addPhoto',personId:op.personId,photo:{id:op.assetId,stage:op.slot}});
+  if(op.kind==='setPhoto')return apply({kind:'addPhoto',personId:op.personId,photo:{id:op.assetId,stage:op.slot,...(op.face?{face:op.face}:{})}});
   if(op.kind==='addPhoto'||op.kind==='updatePhoto'){const ref=db.doc('people/'+op.personId);const cur=(await ref.get()).data()||{};let g=galleryOf(cur);
     g=op.kind==='addPhoto'?[...g.filter(x=>x.id!==op.photo.id),op.photo]:g.map(x=>x.id===op.photo.id?{...x,...op.photo}:x);return ref.update({gallery:g});}
   if(op.kind==='setContact'){const empty=!Object.keys(op.contact||{}).length;
@@ -386,7 +444,7 @@ function renderRelatives(panel){const F=S.focus;if(!F)return;const fl=S.filters;
     (active||fl.sort!=='rel')?h('button',{class:'btn small ghost',text:'Clear filters',onclick:()=>{S.filters={...F_DEF};renderPanel();}}):null);
   panel.append(bar);
   if(!list.length){panel.append(h('p',{class:'q',text:active&&!bornC.size&&!decs.size?'Nobody has a birthplace or birth year filled in yet.':'Nobody matches these filters yet. Many birthplaces and dates are still blank, so this list will fill in as details are added.'}));return;}
-  const row=({p,r})=>{const b=locStr(p.bornPlace);const sub=[r.l,[yearOf(p.born)&&('b. '+yearOf(p.born)),b].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
+  const row=({p,r})=>{const b=locStr(p.bornPlace);const sub=[r.l,[clean(p.born)&&('b. '+clean(p.born)),b].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
     return h('button',{class:'rrow',onclick:()=>select(p.id)},h('span',{class:'rn',text:p.name}),h('span',{class:'rl',text:sub}));};
   if(fl.sort==='born'){list.sort((a,b)=>byBirth(a.p.id,b.p.id));panel.append(h('div',{class:'rgroup'},list.map(row)));return;}
   if(fl.sort==='name'){const last=n=>String(n).replace(/\(.*?\)|[“”"?]/g,'').trim().split(/\s+/).pop();list.sort((a,b)=>last(a.p.name).localeCompare(last(b.p.name))||a.p.name.localeCompare(b.p.name));
@@ -441,7 +499,7 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
     f.onsubmit=async e=>{e.preventDefault();const stage=$('ph-stage').value;f.querySelector('button[type=submit]').disabled=true;
       const read=k=>{const o={stage};for(const[x,n]of[['a','age'],['y','year'],['m','milestone'],['c','caption']]){const v=$(x+'-'+k).value.trim();if(v)o[n]=v;}return o;};
       if(isNew){let n=0;for(const it of list){try{toast('Uploading '+(++n)+' of '+list.length+'…');const r=await S.assets.upload(it.file);
-          await commit({kind:'addPhoto',personId:p.id,assetId:r.id,photo:{id:r.id,...read(it.key)}});}catch(err){toast(uploadMsg(err));}}}
+          await commit({kind:'addPhoto',personId:p.id,assetId:r.id,photo:{id:r.id,...(r.face?{face:r.face}:{}),...read(it.key)}});}catch(err){toast(uploadMsg(err));}}}
       else{const o=read('e0');const old=list[0].ph;for(const k of['age','year','milestone','caption'])if(!o[k]&&old[k])o[k]='';await commit({kind:'updatePhoto',personId:p.id,assetId:ed.id,photo:{id:ed.id,...o}});}
       S.editing=null;renderPanel();};
     return panel.append(f);}
@@ -552,7 +610,7 @@ function renderEdit(panel,p){const ed=S.editing;const sugg=mode()==='suggest';
   panel.append(f);
 }
 function uploadMsg(err){return{too_large:'That file is too big (20 MB limit).',unsupported_type:'Use a photo (JPG, PNG) or a PDF.',quota_or_state:'Storage is full.'}[err?.code]||'Upload didn’t work. Try again.';}
-async function uploadPhoto(id,slot,file){if(!file)return;try{toast('Uploading…');const r=await S.assets.upload(file);await commit({kind:'setPhoto',personId:id,slot,assetId:r.id});}catch(e){toast(uploadMsg(e));}}
+async function uploadPhoto(id,slot,file){if(!file)return;try{toast('Uploading…');const r=await S.assets.upload(file);await commit({kind:'setPhoto',personId:id,slot,assetId:r.id,face:r.face});}catch(e){toast(uploadMsg(e));}}
 function lightbox(aid,title){const lb=$('lightbox');lb.replaceChildren(h('img',{src:blob(aid),alt:title}),h('div',{class:'lb-bar'},
   S.downloads?h('button',{class:'btn',onclick:()=>download({assetId:aid,title}),text:'Download'}):null,h('button',{class:'btn',onclick:()=>lb.hidden=true,text:'Close'})));lb.hidden=false;}
 function openPhoto(pid,aid){const p=P(pid);const ph=galleryOf(p).find(x=>x.id===aid)||{id:aid};const lb=$('lightbox');const line=photoLine(p,ph);
@@ -580,7 +638,9 @@ $('q').addEventListener('input',()=>{const q=$('q').value.trim().toLowerCase();c
   box.replaceChildren(...(hits.length?hits.map(p=>h('button',{onclick:()=>{box.hidden=true;$('q').value='';setFocus(p.id);}},p.name,h('small',{text:(AF?rel(p.id).l+' · ':'')+lifespan(p)}))):[h('div',{class:'q',style:'padding:8px 10px',text:'No one by that name yet'})]));box.hidden=false;});
 document.addEventListener('click',e=>{if(!e.target.closest('.search'))$('results').hidden=true;});
 $('zoomIn').onclick=()=>{S.scale=Math.min(1.6,S.scale+0.15);applyScale();};
-$('zoomOut').onclick=()=>{S.scale=Math.max(0.4,S.scale-0.15);applyScale();};
+$('zoomOut').onclick=()=>{S.scale=Math.max(0.2,S.scale-0.15);applyScale();};
+{const vs=$('viewSel');if(vs){vs.value=S.view;vs.onchange=()=>{S.view=vs.value;try{localStorage.setItem('gft-view',S.view);}catch(e){}
+  if(S.view==='whole'&&S.scale>0.8)S.scale=0.7;renderTree(true);};}}
 $('recenter').onclick=()=>centerOnFocus();
 (()=>{const st=$('stage');let d=null;st.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'||e.target.closest('.card'))return;d={x:e.clientX,y:e.clientY,l:st.scrollLeft,t:st.scrollTop};st.classList.add('dragging');});
   window.addEventListener('pointermove',e=>{if(!d)return;st.scrollLeft=d.l-(e.clientX-d.x);st.scrollTop=d.t-(e.clientY-d.y);});

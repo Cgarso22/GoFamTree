@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import './tree.css';
 import './site.css';
 import { startTree, refreshPanel } from './tree.js';
+import { findFace } from './faces.js';
 
 const SB_URL = import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -273,7 +274,8 @@ function makeAssets(fid, media) {
       const { error } = await sb.storage.from(BUCKET).upload(id, file, { contentType: type, upsert: false });
       if (error) throw Object.assign(new Error(error.message), { code: /exceed|size/i.test(error.message) ? 'too_large' : 'upload_failed' });
       media.remember(id, URL.createObjectURL(file));
-      return { id, url: media.url(id), sizeBytes: file.size, contentType: type };
+      const face = await findFace(file);
+      return { id, url: media.url(id), sizeBytes: file.size, contentType: type, face };
     },
     async delete(id) { const { error } = await sb.storage.from(BUCKET).remove([media.pathOf(id)]); if (error) throw error; },
   };
