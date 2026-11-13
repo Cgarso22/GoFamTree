@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import './tree.css';
 import './site.css';
-import { startTree, refreshPanel } from './tree.js';
+import { startTree, refreshPanel, printTree, focusName } from './tree.js';
 import { findFace } from './faces.js';
 
 const SB_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -139,6 +139,7 @@ function openFamily(m, mems) {
   $('familyBtn').hidden = !canManage;
   $('familyBtn').onclick = () => familyModal(fid, m.role);
   $('acctBtn').onclick = () => accountModal(m, mems);
+  $('printBtn').onclick = () => printModal(m.families?.name);
 
   const media = makeMedia(fid);
   startTree({
@@ -604,4 +605,26 @@ async function openRequestLink(id) {
   else if (r.to_user === CR.uid) toast('You already answered this request.');
   else if (r.status === 'accepted') toast('They shared their contact info. It’s on their page.');
   else if (r.status === 'pending') toast('Still waiting for them to answer.');
+}
+
+// ---------- print ----------
+function printModal(famName) {
+  const who = focusName() || 'this person';
+  const opt = (name, value, label, sub, checked) => h('label', { class: 'pr-opt' }, h('input', { type: 'radio', name, value, checked }),
+    h('span', null, h('strong', { text: label }), h('span', { class: 'm-sub', text: sub })));
+  const form = h('form', { class: 'gate-form' },
+    h('h3', { text: 'What to print' }),
+    opt('what', 'family', who + '’s family', 'Their ancestors back 5 generations, plus brothers, sisters, children and grandchildren.', true),
+    opt('what', 'ancestors', who + '’s ancestors', 'A classic pedigree chart: parents, grandparents and great-grandparents.'),
+    opt('what', 'everyone', 'Everyone', 'Every branch, cousin and in-law in the tree, oldest generations on the left.'),
+    h('h3', { text: 'Size' }),
+    opt('size', 'one', 'One page', 'Everything shrunk to fit a single sheet. Best for the smaller charts.', true),
+    opt('size', 'poster', 'Large, across several pages', 'Full-size boxes split over several sheets you tape together. Best for “Everyone.”'),
+    h('h3', { text: 'Paper' }),
+    opt('paper', 'letter', 'Letter (8½ × 11)', 'Any home printer.', true),
+    opt('paper', 'tabloid', 'Tabloid (11 × 17)', 'Bigger and easier to read. Most print shops and office printers can do it.'),
+    h('button', { class: 'btn primary', type: 'submit', text: 'Open printable version' }),
+    h('p', { class: 'm-sub', text: 'It opens in a new tab. From there, print it or choose “Save as PDF.” To print someone else’s family, center the tree on them first.' }));
+  form.onsubmit = e => { e.preventDefault(); const fd = new FormData(form); printTree(fd.get('what'), fd.get('size'), famName, fd.get('paper')); closeModal(); };
+  modal(h('h2', { text: 'Print the family tree' }), form);
 }

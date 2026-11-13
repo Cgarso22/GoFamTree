@@ -1,6 +1,6 @@
 let CTX=null;
 
-const CW=196, CH=108, GX=22, RH=164, CG=70, RG=14, MAXUP=5, MAXDOWN=3;
+let CW=196, CH=108, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
 const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),tab:'person',editing:null,
   db:null,user:null,assets:null,downloads:null,isOwner:false,uid:null,canWrite:null,suggest:[],mine:null,names:{}};
 const $=id=>document.getElementById(id);
@@ -185,11 +185,13 @@ function layout(F){
     const ks=kidsOf(id,d);const kw=ks.length?ks.reduce((s,k)=>s+descW(k,d+1),0)+GX*(ks.length-1):0;const w=Math.max(bw,kw);dw.set(id,w);return w;}
   function placeKids(id,d,center){const ks=kidsOf(id,d).filter(k=>!nodes.has(k));if(!ks.length)return;
     const kw=ks.reduce((s,k)=>s+descW(k,d+1),0)+GX*(ks.length-1);let cur=center-kw/2;
-    for(const k of ks){const w=descW(k,d+1);const blk=blockOf(k).filter(x=>!nodes.has(x));const bw=blk.length*CW+(blk.length-1)*GX;
-      const bl=cur+(w-bw)/2;blk.forEach((x,i)=>{put(x,bl+i*(CW+GX),(d+1)*RH);
-        if(i>0){const u=unionsOf(k).find(u=>other(u,k)===x);spouseEdges.push({a:k,b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
+    ks.forEach((k,ki)=>{const w=descW(k,d+1);const raw=blockOf(k).filter(x=>!nodes.has(x));const bw=raw.length*CW+(raw.length-1)*GX;
+      // partners go on the outer side, so brothers and sisters stay next to each other
+      const left=ks.length>1&&ki<Math.floor(ks.length/2);const blk=left?[...raw.slice(1).reverse(),k]:raw;
+      const bl=cur+(w-bw)/2;let kx=bl;blk.forEach((x,i)=>{const xx=bl+i*(CW+GX);put(x,xx,(d+1)*RH);if(x===k)kx=xx;
+        else{const u=unionsOf(k).find(u=>other(u,k)===x);spouseEdges.push({a:k,b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
       const ps=parentsOf(k).filter(p=>nodes.has(p));edges.push({parents:ps.length?ps:[id],kid:k});
-      placeKids(k,d+1,bl+CW/2+(blk.length>1?(CW+GX)/2:0));cur+=w+GX;}}
+      placeKids(k,d+1,kx+CW/2+(blk.length>1?(left?-1:1)*(CW+GX)/2:0));cur+=w+GX;});}
   const fb=1+sp.length;placeKids(F,0,fx+(fb*CW+(fb-1)*GX)/2);
   // normalize
   let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
@@ -206,7 +208,7 @@ function tidyH(roots,blockOf,kidsOf,colOf){
     const blk=blockOf(id,nodes);blk.forEach(x=>nodes.set(x,{id:x,x:0,y:0}));
     const kids=kidsOf(blk).filter(k=>!nodes.has(k));const start=cur;const rs=kids.map(place).filter(Boolean);
     const bh=BH(blk.length);let top=rs.length?(rs[0][0]+rs[rs.length-1][1])/2-bh/2:cur;top=Math.max(top,start);
-    blk.forEach((x,i)=>{const n=nodes.get(x);n.y=top+i*(CH+RG);n.x=colOf(x)*(CW+CG);
+    blk.forEach((x,i)=>{const n=nodes.get(x);n.y=top+i*(CH+RG);n.x=colOf(blk[0])*(CW+CG)+(i>0?SPI:0);if(i>0)n.inlaw=true;
       if(i>0){const u=[...S.unions.values()].find(u=>(u.a===blk[0]&&u.b===x)||(u.b===blk[0]&&u.a===x));spouseEdges.push({a:blk[0],b:x,ex:u&&['divorced','ended'].includes(u.status)});}});
     cur=Math.max(cur,top+bh+RG);return[top,top+bh];}
   for(const r of roots)place(r);
@@ -249,20 +251,20 @@ function renderTree(scroll){
   AF=ancMap(S.focus);L=S.view==='whole'?layoutWhole(S.focus):S.view==='pedigree'?layoutPedigree(S.focus):layout(S.focus);
   canvas.style.width=L.w+'px';canvas.style.height=L.h+'px';svg.setAttribute('width',L.w);svg.setAttribute('height',L.h);
   svg.replaceChildren();
-  const NS='http://www.w3.org/2000/svg';const pth=(d,cls)=>{const e=document.createElementNS(NS,'path');e.setAttribute('d',d);if(cls)e.setAttribute('class',cls);svg.append(e);};
+  const NS='http://www.w3.org/2000/svg';const pth=(d,cls,data)=>{const e=document.createElementNS(NS,'path');e.setAttribute('d',d);if(cls)e.setAttribute('class',cls);if(data)for(const[k,v]of Object.entries(data))e.dataset[k]=v;svg.append(e);};
   if(L.horiz){
     for(const n of L.nodes.values()){const ps=parentsOf(n.id).map(p=>L.nodes.get(p)).filter(Boolean);if(!ps.length)continue;
       const px=Math.max(...ps.map(q=>q.x))+CW,py=ps.reduce((s,q)=>s+q.y+CH/2,0)/ps.length,ky=n.y+CH/2,mx=n.x-CG/2;
-      pth(`M${px} ${py} H${mx} V${ky} H${n.x}`);}
+      pth(`M${px} ${py} H${mx} V${ky} H${n.x}`,'',{k:n.id,p:parentsOf(n.id).join(',')});}
     for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[t,u]=a.y<b.y?[a,b]:[b,a];
-      pth(`M${t.x+14} ${t.y+CH} V${u.y}`,e.ex?'ex':'');}
+      pth(`M${t.x+14} ${t.y+CH} V${u.y}`,e.ex?'ex':'',{a:e.a,b:e.b});}
   }
   else{
   for(const e of L.edges){const kn=L.nodes.get(e.kid);const ps=e.parents.map(p=>L.nodes.get(p)).filter(Boolean);if(!kn||!ps.length)continue;
     const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);
-    const kx=kn.x+CW/2,ky=kn.y,my=ky-30;pth(`M${px} ${py} V${my} H${kx} V${ky}`);}
+    const kx=kn.x+CW/2,ky=kn.y,my=ky-30;pth(`M${px} ${py} V${my} H${kx} V${ky}`,'',{k:e.kid,p:e.parents.join(',')});}
   for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];const y=l.y+CH/2;
-    pth(`M${l.x+CW} ${y} H${r.x}`,e.ex?'ex':'');}
+    pth(`M${l.x+CW} ${y} H${r.x}`,e.ex?'ex':'',{a:e.a,b:e.b});}
   }
   // generation labels
   const gname=k=>k===0?'Generation of '+firstName(S.focus):k<0?(['Parents','Grandparents','Great-grandparents','2× great-grandparents','3× great-grandparents','4× great-grandparents'][-k-1]||''):(['Children','Grandchildren','Great-grandchildren'][k-1]||'');
@@ -274,11 +276,12 @@ function renderTree(scroll){
   for(const n of L.nodes.values()){const p=P(n.id);const r=rel(n.id);
     const ph=portraitOf(p);
     const av=h('div',{class:'av',style:ph?`background-image:url("${blob(ph)}");background-position:${facePos(p,ph)}`:null},ph?'':(isUnknown(p)?'?':initials(p.name)));
-    const card=h('button',{class:'card'+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
+    const inlaw=n.id!==S.focus&&(n.inlaw||(!L.horiz&&[2,7,8].includes(r.cat)));
+    const card=h('button',{class:'card'+(inlaw?' inlaw':'')+(n.id===S.focus?' focus':'')+(n.id===S.sel?' sel':'')+(isUnknown(p)?' unknown':''),style:`left:${n.x}px;top:${n.y}px`,
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
       av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
-  applyScale();
+  applyScale();highlightPath();
   $('centered').replaceChildren('Centered on ',h('b',{text:P(S.focus).name}),' · click a person, then click again to re-center');
   if(scroll)centerOnFocus();
 }
@@ -287,10 +290,84 @@ function applyScale(){if(!L)return;$('canvas').style.transform=`scale(${S.scale}
 function centerOnFocus(){if(!L)return;const n=L.nodes.get(S.focus);const st=$('stage');
   st.scrollLeft=(n.x+CW/2)*S.scale-st.clientWidth/2;st.scrollTop=(n.y+CH/2)*S.scale-st.clientHeight*0.55;}
 
+/* ---------- printing ---------- */
+// Builds a clean, compact version of the tree as vector graphics and opens it ready to print or save as a PDF.
+const escX=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function wrap2(s,max){if(s.length<=max)return[s];const w=s.split(' ');let a='';while(w.length&&(a+' '+w[0]).trim().length<=max)a=(a+' '+w.shift()).trim();
+  let b=w.join(' ');if(b.length>max)b=b.slice(0,max-1)+'…';return a?[a,b]:[s.slice(0,max-1)+'…'];}
+export function printTree(mode,size,famName,paper){const big=paper==='tabloid';
+  const save=[CW,CH,GX,RH,CG,RG,SPI];
+  CW=168;CH=64;GX=10;RH=112;CG=44;RG=8;SPI=16;
+  const F=S.focus;let PL,title;
+  try{
+    if(mode==='everyone'){PL=layoutWhole(F);title='Everyone in the family';}
+    else if(mode==='ancestors'){PL=layoutPedigree(F);title=nameOf(F)+'’s ancestors';}
+    else{PL=layout(F);title=nameOf(F)+'’s family';}
+  }catch(e){[CW,CH,GX,RH,CG,RG,SPI]=save;throw e;}
+  const W=PL.w,H=PL.h;let out=[];
+  const line=(d,ex)=>out.push(`<path d="${d}" fill="none" stroke="#C9B48F" stroke-width="1.2"${ex?' stroke-dasharray="4 3"':''}/>`);
+  if(PL.horiz){
+    for(const n of PL.nodes.values()){const ps=parentsOf(n.id).map(p=>PL.nodes.get(p)).filter(Boolean);if(!ps.length)continue;
+      const px=Math.max(...ps.map(q=>q.x))+CW,py=ps.reduce((s,q)=>s+q.y+CH/2,0)/ps.length,ky=n.y+CH/2,mx=n.x-CG/2;line(`M${px} ${py} H${mx} V${ky} H${n.x}`);}
+    for(const e of PL.spouseEdges){const a=PL.nodes.get(e.a),b=PL.nodes.get(e.b);if(!a||!b)continue;const[t,u]=a.y<b.y?[a,b]:[b,a];line(`M${t.x+8} ${t.y+CH} V${u.y}`,e.ex);}
+  }else{
+    for(const e of PL.edges){const kn=PL.nodes.get(e.kid);const ps=e.parents.map(p=>PL.nodes.get(p)).filter(Boolean);if(!kn||!ps.length)continue;
+      const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);const kx=kn.x+CW/2,ky=kn.y;line(`M${px} ${py} V${ky-24} H${kx} V${ky}`);}
+    for(const e of PL.spouseEdges){const a=PL.nodes.get(e.a),b=PL.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];line(`M${l.x+CW} ${l.y+CH/2} H${r.x}`,e.ex);}
+  }
+  for(const n of PL.nodes.values()){const p=P(n.id);const r=relation(F,n.id,ancMap(F));
+    const inlaw=n.id!==F&&(n.inlaw||(!PL.horiz&&[2,7,8].includes(r.cat)));
+    const fill=n.id===F?'#EFE5D6':inlaw?'#FBFAF8':'#FFFFFF',stroke=n.id===F?'#86602F':'#D9C6A8';
+    const nm=wrap2(cardName(p),25),ds=cardDates(p);let y=n.y+15;const t=[];
+    if(mode!=='everyone'){t.push(`<text x="${n.x+9}" y="${y}" font-size="7.5" letter-spacing=".6" fill="#86602F" font-weight="600">${escX(r.l.toUpperCase())}</text>`);y+=12;}
+    for(const s of nm){t.push(`<text x="${n.x+9}" y="${y}" font-family="Literata,Georgia,serif" font-size="11" fill="${inlaw?'#5d564e':'#24211D'}">${escX(s)}</text>`);y+=12.5;}
+    for(const s of ds){if(y>n.y+CH-4)break;t.push(`<text x="${n.x+9}" y="${y}" font-size="8.5" fill="#756D63">${escX(s)}</text>`);y+=10.5;}
+    out.push(`<g><rect x="${n.x}" y="${n.y}" width="${CW}" height="${CH}" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="${n.id===F?1.6:1}"${p.placeholder?' stroke-dasharray="3 2"':''}/>${t.join('')}</g>`);}
+  [CW,CH,GX,RH,CG,RG,SPI]=save;
+  const svgBody=out.join('');
+  const head=`<div class="hd"><span class="t"><b>${escX(famName||'Family Tree')}</b> · ${escX(title)}</span><span>Printed ${new Date().toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'})} · gofamtree.com</span></div>`;
+  const landscape=W>=H||size==='poster';
+  const PW=big?(landscape?16.4:10.4):(landscape?10.4:7.9),PH=big?(landscape?10.4:16.4):(landscape?7.9:10.4); // printable inches, 0.3in margins
+  let pages='';
+  if(size==='poster'){const tw=PW*96,th=(PH-0.45)*96;const cols=Math.ceil(W/tw),rows=Math.ceil(H/th);
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      pages+=`<section class="pg">${head}<svg viewBox="${c*tw} ${r*th} ${tw} ${th}" width="${PW}in" height="${PH-0.45}in" font-family="Inter,Helvetica,Arial,sans-serif">${svgBody}</svg><div class="ft">Page ${r*cols+c+1} of ${rows*cols} · row ${r+1}, column ${c+1}. Lay pages out in a grid (${rows} rows × ${cols} columns) and tape them together.</div></section>`;}}
+  else pages=`<section class="pg">${head}<svg viewBox="0 0 ${W} ${H}" width="${PW}in" height="${PH-0.45}in" preserveAspectRatio="xMidYMid meet" font-family="Inter,Helvetica,Arial,sans-serif">${svgBody}</svg></section>`;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>${escX(famName||'Family Tree')} - ${escX(title)}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Literata:opsz,wght@7..72,500&display=swap">
+<style>@page{size:${big?'11in 17in':'letter'} ${landscape?'landscape':'portrait'};margin:0.3in}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;font-family:Inter,Helvetica,Arial,sans-serif;color:#24211D;background:#fff}
+.bar{position:sticky;top:0;display:flex;gap:10px;align-items:center;padding:10px 16px;background:#FBFAF8;border-bottom:1px solid #E4DDD2;font-size:14px}
+.bar button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid #86602F;background:#86602F;color:#fff;cursor:pointer}
+.pg{width:${PW}in;margin:16px auto;break-after:page;page-break-after:always}.pg:last-child{break-after:auto}
+.hd{display:flex;justify-content:space-between;align-items:baseline;font-size:11pt;padding-bottom:4px;border-bottom:1px solid #D9C6A8;margin-bottom:4px}
+.hd b{font-family:Literata,Georgia,serif;font-size:13pt}.hd>span:last-child{font-size:8pt;color:#756D63}.ft{font-size:7.5pt;color:#756D63;text-align:right}
+@media print{.bar{display:none}.pg{margin:0}}</style></head><body>
+<div class="bar"><button onclick="print()">Print or save as PDF</button><span>${size==='poster'?'Prints across several pages to tape together.':'Fits on one page.'} In the print window, choose “Save as PDF” to keep a copy.</span></div>
+${pages}</body></html>`;
+  const w=window.open('','_blank');if(!w){toast('Allow pop-ups for this site to print.');return;}
+  w.document.open();w.document.write(html);w.document.close();
+}
+
+/* ---------- trace the line between two people ---------- */
+function pathBetween(a,b){if(!a||!b||a===b)return[];const prev=new Map([[a,null]]);const q=[a];
+  while(q.length){const c=q.shift();if(c===b)break;
+    for(const n of[...parentsOf(c),...childrenOf(c),...spousesOf(c)])if(!prev.has(n)&&P(n)){prev.set(n,c);q.push(n);}}
+  if(!prev.has(b))return[];const out=[];for(let c=b;c!=null;c=prev.get(c))out.unshift(c);return out;}
+function highlightPath(){const svg=$('links');if(!svg)return;
+  svg.querySelectorAll('.hl').forEach(e=>e.classList.remove('hl'));document.querySelectorAll('.card.onpath').forEach(e=>e.classList.remove('onpath'));
+  const path=pathBetween(S.focus,S.sel);if(path.length<2)return;const on=new Set(path);
+  const pairs=new Set();for(let i=1;i<path.length;i++){pairs.add(path[i-1]+'|'+path[i]);pairs.add(path[i]+'|'+path[i-1]);}
+  for(const e of svg.querySelectorAll('path')){const d=e.dataset;
+    if(d.k&&(d.p||'').split(',').some(p=>pairs.has(d.k+'|'+p)))e.classList.add('hl');
+    if(d.a&&pairs.has(d.a+'|'+d.b))e.classList.add('hl');}
+  for(const c of document.querySelectorAll('.card'))if(on.has(c.dataset.id)&&c.dataset.id!==S.focus)c.classList.add('onpath');
+  svg.querySelectorAll('.hl').forEach(e=>svg.append(e));}
+
 /* ---------- focus & selection ---------- */
 function setFocus(id,fromHash){if(!P(id))return;S.focus=id;S.sel=id;if(!fromHash&&location.hash!=='#'+id){try{location.hash=id;}catch(e){}}
   S.editing=null;renderTree(true);renderPanel();openSheet();}
-function select(id){S.sel=id;S.editing=null;S.tab='person';document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.id===id));renderPanel();openSheet();}
+function select(id){S.sel=id;S.editing=null;S.tab='person';document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.id===id));highlightPath();renderPanel();openSheet();}
 function openSheet(){$('aside').classList.remove('closed');}
 window.addEventListener('hashchange',()=>{const id=decodeURIComponent(location.hash.slice(1));if(id&&id!==S.focus&&P(id))setFocus(id,true);});
 
@@ -661,6 +738,7 @@ function refresh(){if(!S.loaded.p||!S.loaded.u)return;
   else renderTree(false);
   renderPanel();}
 export function refreshPanel(){renderPanel();}
+export const focusName=()=>S.focus?nameOf(S.focus):'';
 export function startTree(ctx){
   CTX=ctx; const db=ctx.db; S.db=db; S.assets=ctx.assets; S.downloads=ctx.downloads; S.dictation=ctx.dictation;
   S.isOwner=ctx.canManage; S.uid=ctx.uid; S.canWrite=ctx.canContribute;

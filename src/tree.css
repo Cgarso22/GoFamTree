@@ -177,3 +177,9 @@ form.edit .check{display:flex;align-items:center;gap:8px;color:var(--ink);font-s
   .centered{order:3;flex-basis:100%}
 }
 @media (prefers-reduced-motion:no-preference){.card{transition:border-color .15s,background .15s}}
+/* people who married into the family read a little lighter, so blood lines stand out */
+.card.inlaw{background:var(--bg);border-color:var(--line);box-shadow:none}
+.card.inlaw .nm{color:var(--muted)}
+/* the line from the centered person to whoever is selected */
+#links path.hl{stroke:var(--accent);stroke-width:3}
+.card.onpath{border-color:var(--accent)}

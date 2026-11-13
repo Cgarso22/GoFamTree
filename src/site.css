@@ -44,3 +44,7 @@
 #modalCard .check input{width:auto}
 #modalCard textarea{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;color:var(--ink);width:100%;box-sizing:border-box;resize:vertical;font:inherit}
 .cr-quote{margin:0;padding:8px 12px;border-left:3px solid var(--wood-line);background:var(--accent-soft);border-radius:0 8px 8px 0;font-size:14px}
+.pr-opt{flex-direction:row!important;align-items:flex-start!important;gap:10px!important;padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;color:var(--ink)!important;font-size:14px!important}
+.pr-opt input{width:auto!important;margin-top:3px}
+.pr-opt>span{display:flex;flex-direction:column;gap:2px}
+.pr-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
