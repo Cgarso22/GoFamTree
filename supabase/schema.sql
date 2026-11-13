@@ -2,7 +2,7 @@
 -- Run once in the Supabase SQL editor. Safe to re-run: it drops nothing.
 -- Every table is private to the families a signed-in user belongs to (row-level security).
 
-create extension if not exists "pgcrypto";
+-- (no extensions needed)
 
 -- ---------- types ----------
 do $$ begin
@@ -47,7 +47,7 @@ create table if not exists invites (
   email text not null,
   role family_role not null default 'contributor',
   person_id text,
-  token text not null unique default encode(gen_random_bytes(18),'hex'),
+  token text not null unique default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
   invited_by uuid references auth.users,
   accepted_by uuid references auth.users,
   accepted_at timestamptz,
