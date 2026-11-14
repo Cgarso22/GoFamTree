@@ -150,8 +150,10 @@ function openFamily(m, mems) {
     canManage, canContribute: rank(m.role) >= 2, uid, myPersonId: m.person_id,
     addSelf: () => addSelf(fid, uid),
     contactActions: pid => contactActions(pid),
+    requestAccess: pid => requestAccessModal(fid, pid), accessStatus: pid => ACC.mine.find(r => r.person_id === pid && r.status === 'pending') ? 'pending' : null,
   });
   initContacts(fid, uid);
+  initAccess(fid, uid);
 }
 
 async function addSelf(fid, uid) {
@@ -166,6 +168,7 @@ async function addSelf(fid, uid) {
 }
 
 // ---------- data layer: documents stored in family_docs ----------
+const PRIVATE = new Set(['people', 'contacts']);
 function makeDb(fid, uid) {
   const listeners = new Set();
   const tbl = () => sb.from('family_docs');
@@ -174,9 +177,10 @@ function makeDb(fid, uid) {
   const fail = error => { const e = new Error(error.message); e.code = error.code; return e; };
 
   function poke(coll) { for (const l of listeners) if (!coll || l.coll === coll) l.refresh(); }
+  // the database notes each change in family_changes; everyone in the family can watch that
   sb.channel('family-' + fid)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'family_docs', filter: 'family_id=eq.' + fid },
-      p => poke(p.new?.collection || p.old?.collection))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'family_changes', filter: 'family_id=eq.' + fid },
+      p => { const c = p.new?.collection || p.old?.collection; if (c === 'grants') { poke('people'); poke('contacts'); window.dispatchEvent(new Event('gft-grants')); } else poke(c); })
     .subscribe(status => { if (status === 'SUBSCRIBED') poke(); });
   // catch up after the tab sleeps
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poke(); });
@@ -190,14 +194,19 @@ function makeDb(fid, uid) {
   }
 
   const collection = coll => ({
-    async get() { const { data, error } = await tbl().select('doc_id, data').eq('family_id', fid).eq('collection', coll); if (error) throw fail(error); return snapOf(data); },
+    async get() {
+      // people and contact details come through family_people(), which hides private details per viewer
+      const { data, error } = PRIVATE.has(coll) ? await sb.rpc('family_people', { fam: fid, coll })
+        : await tbl().select('doc_id, data').eq('family_id', fid).eq('collection', coll);
+      if (error) throw fail(error); return snapOf(data); },
     onSnapshot(cb, err) { return listen(coll, null, () => this.get(), cb, err); },
     doc: id => doc(coll + '/' + id),
   });
 
   function doc(path) {
     const [coll, id] = path.split('/');
-    const get = async () => { const { data, error } = await tbl().select('doc_id, data').eq('family_id', fid).eq('collection', coll).eq('doc_id', id).maybeSingle();
+    const get = async () => { if (PRIVATE.has(coll)) { const { data, error } = await sb.rpc('family_people', { fam: fid, coll }); if (error) throw fail(error); return docSnap((data || []).find(r => r.doc_id === id)); }
+      const { data, error } = await tbl().select('doc_id, data').eq('family_id', fid).eq('collection', coll).eq('doc_id', id).maybeSingle();
       if (error) throw fail(error); return docSnap(data); };
     return {
       id, get,
@@ -431,6 +440,7 @@ function accountModal(m, mems) {
     switcher,
     h('div', { class: 'row', style: 'margin-top:14px;gap:8px;display:flex;flex-wrap:wrap' },
       h('button', { class: 'btn', text: 'My contact info', onclick: () => myContactModal() }),
+      h('button', { class: 'btn', text: 'My privacy', onclick: () => privacyModal(m.family_id, m.person_id) }),
       h('button', { class: 'btn', text: 'Sign out', onclick: () => sb.auth.signOut() })));
 }
 
@@ -463,7 +473,7 @@ async function displayName(userId) {
   if (CR.names.has(userId)) return CR.names.get(userId);
   let name = '';
   const pid = personOfUser(userId);
-  if (pid) { const { data } = await sb.from('family_docs').select('data').eq('family_id', CR.fid).eq('collection', 'people').eq('doc_id', pid).maybeSingle(); name = data?.data?.name || ''; }
+  if (pid) { const n = await personNameIn(CR.fid, pid); name = n === 'this person' ? '' : n; }
   if (!name) { const { data } = await sb.from('profiles').select('display_name').eq('id', userId).maybeSingle(); name = data?.display_name || 'A family member'; }
   CR.names.set(userId, name); return name;
 }
@@ -632,4 +642,79 @@ function printModal(famName) {
     h('p', { class: 'm-sub', text: 'It opens in a new tab. From there, print it or choose “Save as PDF.” To print someone else’s family, center the tree on them first.' }));
   form.onsubmit = e => { e.preventDefault(); const fd = new FormData(form); printTree(fd.get('what'), fd.get('size'), famName, fd.get('paper'), { cousins: +fd.get('cousins') }); closeModal(); };
   modal(h('h2', { text: 'Print the family tree' }), form);
+}
+
+// ---------- privacy: requests to see someone's private details ----------
+const ACC = { fid: null, uid: null, mine: [], toMe: [] };
+async function initAccess(fid, uid) {
+  ACC.fid = fid; ACC.uid = uid;
+  await loadAccess();
+  window.addEventListener('gft-grants', () => loadAccess().then(refreshPanel));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadAccess(); });
+}
+async function loadAccess() {
+  const { data } = await sb.from('view_requests').select('*').eq('family_id', ACC.fid).order('created_at', { ascending: false });
+  const rows = data || [];
+  ACC.mine = rows.filter(r => r.requester === ACC.uid);
+  ACC.toMe = rows.filter(r => r.requester !== ACC.uid && r.status === 'pending');
+  const b = $('requestsBtn');
+  if (b) { b.hidden = !ACC.toMe.length; b.textContent = 'Requests (' + ACC.toMe.length + ')'; b.onclick = () => accessRequestsModal(); }
+}
+async function personNameIn(fid, pid) {
+  const { data } = await sb.rpc('family_people', { fam: fid, coll: 'people' });
+  return (data || []).find(r => r.doc_id === pid)?.data?.name || 'this person';
+}
+async function requestAccessModal(fid, pid) {
+  const name = await personNameIn(fid, pid);
+  const note = h('textarea', { rows: '3', maxlength: '500', placeholder: 'Say who you are and why, e.g. “I’m Amy’s brother Amir. I’d love to see the family photos.”' });
+  const msg = h('p', { class: 'gate-msg' });
+  const form = h('form', { class: 'gate-form' },
+    h('p', { class: 'gate-note', text: name + ' or their close family (parents, children, brothers, sisters, partner) can approve this, as can the tree’s managers. If approved, you’ll see their birthday, where they live (if they share it), photos, stories and other details.' }),
+    h('label', null, 'Note', note), msg, h('button', { class: 'btn primary', type: 'submit', text: 'Send request' }));
+  form.onsubmit = async e => { e.preventDefault();
+    const { error } = await sb.from('view_requests').insert({ family_id: fid, person_id: pid, note: note.value.trim() || null });
+    if (error) { msg.textContent = /one_open/.test(error.message) ? 'You already asked. It’s waiting for an answer.' : error.message; return; }
+    closeModal(); await loadAccess(); refreshPanel(); toast('Request sent'); };
+  modal(h('h2', { text: 'Ask to see ' + name.split(' ')[0] + '’s details' }), form);
+}
+async function accessRequestsModal() {
+  await loadAccess();
+  const ids = [...new Set(ACC.toMe.map(r => r.requester))];
+  const { data: profs } = ids.length ? await sb.from('profiles').select('id, display_name').in('id', ids) : { data: [] };
+  const { data: mems } = await sb.from('family_members').select('user_id, person_id').eq('family_id', ACC.fid);
+  const { data: ppl } = await sb.rpc('family_people', { fam: ACC.fid, coll: 'people' });
+  const pname = pid => (ppl || []).find(r => r.doc_id === pid)?.data?.name || pid;
+  const who = uid => { const pid = (mems || []).find(m => m.user_id === uid)?.person_id; return pid ? pname(pid) : ((profs || []).find(p => p.id === uid)?.display_name || 'A family member'); };
+  const rows = ACC.toMe.map(r => h('div', { class: 'm-row' },
+    h('div', { class: 'm-who' }, h('strong', { text: who(r.requester) + ' wants to see ' + pname(r.person_id) + '’s details' }),
+      r.note ? h('span', { class: 'm-sub', text: '“' + r.note + '”' }) : null),
+    h('button', { class: 'btn small primary', text: 'Approve', onclick: () => decide(r.id, true) }),
+    h('button', { class: 'btn small', text: 'Decline', onclick: () => decide(r.id, false) })));
+  async function decide(id, ok) {
+    const { error } = await sb.rpc('decide_access', { req: id, approve: ok });
+    toast(error ? error.message : ok ? 'Approved' : 'Declined'); await loadAccess();
+    if (ACC.toMe.length) accessRequestsModal(); else closeModal(); }
+  modal(h('h2', { text: 'Requests to see private details' }),
+    h('p', { class: 'gate-note', text: 'Approving lets that person see the full details of the one person named. You can approve or decline each separately.' }),
+    rows.length ? h('div', { class: 'm-list' }, rows) : h('p', { class: 'm-sub', text: 'Nothing waiting.' }));
+}
+async function privacyModal(fid, pid) {
+  if (!pid) { modal(h('h2', { text: 'My privacy' }), h('p', { class: 'gate-note', text: 'Your account isn’t linked to a person in the tree yet. Ask the tree’s manager to link you.' })); return; }
+  const { data } = await sb.rpc('family_people', { fam: fid, coll: 'people' });
+  const me = (data || []).find(r => r.doc_id === pid)?.data || {};
+  const radio = (name, value, label, sub, checked) => h('label', { class: 'pr-opt' }, h('input', { type: 'radio', name, value, checked }),
+    h('span', null, h('strong', { text: label }), sub ? h('span', { class: 'm-sub', text: sub }) : null));
+  const form = h('form', { class: 'gate-form' },
+    h('p', { class: 'gate-note', text: 'Your close family (out to first cousins and their partners) always sees your full details. These settings are about everyone else in the tree.' }),
+    h('h3', { text: 'Where you live' }),
+    radio('res', 'close', 'Close family only', 'Recommended.', me.shareResidence !== 'tree'),
+    radio('res', 'tree', 'Everyone in the family tree', 'Shows your city and state to more distant relatives.', me.shareResidence === 'tree'),
+    h('h3', { text: 'Your main photo' }),
+    radio('pic', 'show', 'Show my main photo to everyone in the tree', 'Only the one photo set as your picture. Other photos stay private.', !me.hidePortrait),
+    radio('pic', 'hide', 'Hide it from people outside my close family', null, !!me.hidePortrait),
+    h('button', { class: 'btn primary', type: 'submit', text: 'Save' }));
+  form.onsubmit = async e => { e.preventDefault(); const fd = new FormData(form);
+    const { error } = await sb.rpc('set_my_privacy', { fam: fid, share_residence: fd.get('res'), hide_portrait: fd.get('pic') === 'hide' });
+    toast(error ? error.message : 'Saved'); if (!error) closeModal(); };
+  modal(h('h2', { text: 'My privacy' }), form);
 }

@@ -20,6 +20,7 @@ function q(table) {
       if (op === 'insert') { const r = { id: 'r' + R.length, from_user: UID, status: 'pending', ...payload }; R.push(r); return { data: r }; }
       if (op === 'delete') { for (let i = R.length - 1; i >= 0; i--) if (match(R[i])) R.splice(i, 1); return { data: null }; }
       const rows = R.filter(match); return { data: single ? rows[0] || null : rows }; }
+    if (table === 'view_requests') { const R = window.__VR__ = window.__VR__ || []; if (op === 'insert') { R.push({ id: 'v' + R.length, requester: UID, status: 'pending', ...payload }); return { data: null }; } return { data: R.filter(match) }; }
     if (table === 'member_contacts') { if (op === 'upsert') { window.__MC__ = payload; return {}; } return { data: window.__MC__ || null }; }
     if (table === 'profiles') return { data: [] };
     if (table === 'invites') return { data: [] };
@@ -35,7 +36,7 @@ export function createClient() {
     auth: { onAuthStateChange(cb) { setTimeout(() => cb('SIGNED_IN', session)); return { data: {} }; }, signOut() {} },
     from: q,
     functions: { invoke: async (n, o) => { (window.__MAIL__ = window.__MAIL__ || []).push(o.body); return {}; } },
-    rpc: async (fn, a) => { if (fn === 'respond_contact_request') { const r = window.__REQS__.find(x => x.id === a.req); r.status = a.accept ? 'accepted' : 'declined'; r.shared = a.share; return {}; } if (fn === 'merge_doc') { const r = docs.find(x => x.collection === a.coll && x.doc_id === a.did); if (!r) return { error: { message: 'not_found' } }; r.data = { ...r.data, ...a.patch }; } return { data: null }; },
+    rpc: async (fn, a) => { if (fn === 'family_people') { const rows = docs.filter(r => r.collection === a.coll).map(r => ({ doc_id: r.doc_id, data: (window.__MASK__ && window.__MASK__[r.doc_id]) || r.data })); return { data: rows }; } if (fn === 'respond_contact_request') { const r = window.__REQS__.find(x => x.id === a.req); r.status = a.accept ? 'accepted' : 'declined'; r.shared = a.share; return {}; } if (fn === 'merge_doc') { const r = docs.find(x => x.collection === a.coll && x.doc_id === a.did); if (!r) return { error: { message: 'not_found' } }; r.data = { ...r.data, ...a.patch }; } return { data: null }; },
     channel: () => ({ on() { return this; }, subscribe(cb) { cb && cb('SUBSCRIBED'); return this; } }),
     storage: { from: () => ({ createSignedUrls: async paths => ({ data: paths.map(p => ({ signedUrl: '/fake/' + p })) }), upload: async () => ({}), remove: async () => ({}) }) },
   };

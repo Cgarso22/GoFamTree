@@ -23,7 +23,7 @@ const yearOf=s=>{const m=String(s||'').match(/\b(1[6-9]\d\d|20\d\d)\b/);return m
 function lifespan(p){const b=yearOf(p.born),d=yearOf(p.died);
   if(p.deceased||p.died){return (b||'?')+' – '+(d||'?');} return b?'b. '+b:(p.born?'b. '+p.born:'b. ?');}
 const clean=s=>String(s||'').trim();
-function cardDates(p){const b=clean(p.born),d=clean(p.died);
+function cardDates(p){if(p._masked)return[p._minor?'Under 18 · private':'Details private'];const b=clean(p.born),d=clean(p.died);
   if(p.deceased||d)return ['b. '+(b||'?'),'d. '+(d||'?')];return ['b. '+(b||'?')];}
 function initials(n){return String(n||'?').replace(/[“”"()?]/g,'').trim().split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase()||'?';}
 const blob=id=>CTX.url(id);
@@ -391,6 +391,22 @@ ${pages}</body></html>`;
   w.document.open();w.document.write(html);w.document.close();
 }
 
+/* ---------- private people ---------- */
+const HIDDEN_LABEL={born:'Birthday',bornPlace:'Birthplace',bornHospital:'Birth hospital',residence:'Lives in',jobs:'Work',occupation:'Work',
+  hsSchool:'Education',colSchool:'Education',gradSchool:'Education',eduOther:'Education',notes:'Notes',stories:'Stories & voice messages',docs:'Documents',gallery:'More photos',died:'Death'};
+function privateBlock(id,p){const fn=firstName(id);const labels=[...new Set((p._hidden||[]).map(k=>HIDDEN_LABEL[k]).filter(Boolean))];
+  const fake=['Mar 14, 19••','Los Angeles, CA','•••••• ••••','•••• ••••• ••••'];
+  const rows=labels.length?h('dl',{class:'facts blurred','aria-hidden':'true'},labels.flatMap((l,i)=>[h('dt',{text:l}),h('dd',{text:fake[i%fake.length]})])):null;
+  const st=CTX.accessStatus?.(id);
+  const btn=st==='pending'?h('p',{class:'q',style:'margin:0',text:'You asked to see more. '+fn+' or a close family member will decide.'})
+    :h('button',{class:'btn primary',text:'Ask to see '+fn+'’s details',onclick:()=>CTX.requestAccess?.(id)});
+  return h('div',{class:'section private'},
+    h('h3',{text:p._minor?'Private: under 18':'Private'}),
+    h('p',{class:'q',style:'margin:0 0 8px',text:p._minor
+      ?'Details about children are shown only to their immediate family.'
+      :fn+'’s details are shown to close family. You can ask to see more; '+fn+' or their close family decides.'}),
+    rows,btn);}
+
 /* ---------- colors: whose line is whose ---------- */
 // kind: self | direct (ancestor or descendant) | blood (shares an ancestor) | married (married into the family)
 // line: which of the centered person's four grandparents the connection runs through (1-4), or 0 for their own household
@@ -503,8 +519,9 @@ function renderPanel(){const panel=$('panel');panel.replaceChildren();
     h('h2',{text:p.name}),(p.maiden||p.nick||p.aka)?h('div',{class:'p-sub',text:[p.maiden&&('born '+p.maiden),p.nick&&('goes by “'+p.nick+'”'),p.aka&&('also known as '+p.aka)].filter(Boolean).join(' · ')}):null));
   const acts=h('div',{class:'p-actions'});
   if(id!==S.focus)acts.append(h('button',{class:'btn primary',onclick:()=>setFocus(id),text:'Center tree on '+firstName(id)}));
-  if(mode()!=='view')acts.append(h('button',{class:'btn',onclick:()=>{S.editing={type:'person'};renderPanel();},text:mode()==='edit'?'Edit details':'Suggest a correction'}));
+  if(mode()!=='view'&&!p._masked)acts.append(h('button',{class:'btn',onclick:()=>{S.editing={type:'person'};renderPanel();},text:mode()==='edit'?'Edit details':'Suggest a correction'}));
   panel.append(acts);
+  if(p._masked){panel.append(privateBlock(id,p));const ex=CTX.contactActions?.(id);if(ex)panel.append(h('div',{class:'section'},h('h3',{text:'Contact'}),ex));return;}
   if(mode()==='suggest')panel.append(h('div',{class:'note',text:'Anything you add or correct goes to the family’s tree managers for review before it appears in the tree.'}));
   // facts
   const fact=(k,v)=>[h('dt',{text:k}),h('dd',v?{text:v}:{class:'q',text:'?'})];
