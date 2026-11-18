@@ -1,7 +1,7 @@
 import {makeExplore} from './explore.js';
 let CTX=null;
 
-let CW=196, CH=120, GX=22, RH=164, CG=70, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
+let CW=196, CH=120, GX=22, RH=164, CG=124, RG=14, SPI=30, MAXUP=5, MAXDOWN=3;
 const S={contacts:new Map(),hiddenContacts:new Map(),people:new Map(),unions:new Map(),loaded:{p:false,u:false},focus:null,sel:null,scale:innerWidth<600?0.8:1,view:(()=>{try{return localStorage.getItem('gft-view')||'centered';}catch(e){return 'centered';}})(),colorBy:(()=>{try{return localStorage.getItem('gft-color')||'relation';}catch(e){return 'relation';}})(),
   side:(()=>{try{return localStorage.getItem('gft-side')||'father';}catch(e){return 'father';}})(),
   cousins:(()=>{try{return +(localStorage.getItem('gft-cousins')??1);}catch(e){return 1;}})(),tab:'person',editing:null,
@@ -213,6 +213,11 @@ function layout(F){
 }
 
 /* ---------- left-to-right layouts ---------- */
+// A block's children, kept together by marriage: the first partner's children, then the next partner's, then any others.
+function kidsByMarriage(blk){const head=blk[0];const all=[...new Set(blk.flatMap(b=>childrenOf(b)))];const out=[];
+  for(const sp of blk.slice(1))out.push(...all.filter(k=>!out.includes(k)&&parentsOf(k).includes(head)&&parentsOf(k).includes(sp)).sort(byBirth));
+  out.push(...all.filter(k=>!out.includes(k)&&parentsOf(k).includes(head)).sort(byBirth));
+  out.push(...all.filter(k=>!out.includes(k)).sort(byBirth));return out;}
 // Lays out blocks (a person plus any partners stacked under them) in columns, children to the right.
 function tidyH(roots,blockOf,kidsOf,colOf){
   const nodes=new Map(),edges=[],spouseEdges=[];let cur=0;const BH=n=>n*(CH+RG)-RG;
@@ -246,7 +251,7 @@ function layoutWhole(F){const g=genMap();const home=P(CTX?.myPersonId)?CTX.myPer
   const ord=(id,s)=>unionsOf(id).find(u=>other(u,id)===s)?.order||0;
   const R=tidyH(roots,
     (id,placed)=>[id,...spousesOf(id).filter(s=>s!==id&&!placed.has(s)).sort((a,b)=>ord(id,a)-ord(id,b))].filter((x,i,a)=>a.indexOf(x)===i),
-    blk=>[...new Set(blk.flatMap(b=>childrenOf(b)))].sort(byBirth),
+    blk=>kidsByMarriage(blk),
     id=>g.get(id));
   return finishH(R,id=>g.get(id),c=>c);}
 function layoutPedigree(F){const depth=new Map([[F,0]]);
@@ -273,35 +278,87 @@ function layoutBranch(F,side=S.side,n=S.cousins){const inc=branchSet(F,side,n);c
   const roots=[...new Set([...anc,...[...inc].filter(isRoot).sort((a,b)=>g.get(a)-g.get(b)||byBirth(a,b)),...inc])];
   const ord=(id,s)=>unionsOf(id).find(u=>other(u,id)===s)?.order||0;
   const R=tidyH(roots,(id,placed)=>[id,...spousesOf(id).filter(s=>s!==id&&inc.has(s)&&!placed.has(s)&&isRoot(s)).sort((a,b)=>ord(id,a)-ord(id,b))],
-    blk=>[...new Set(blk.flatMap(b=>childrenOf(b)))].filter(k=>inc.has(k)).sort(byBirth),id=>g.get(id));
+    blk=>kidsByMarriage(blk).filter(k=>inc.has(k)),id=>g.get(id));
   return finishH(R,id=>g.get(id),c=>c);}
 const COUSIN_LABEL={0:'Direct line and siblings',1:'Up to first cousins',2:'Up to second cousins',3:'Up to third cousins',4:'Up to fourth cousins',9:'Everyone on this side'};
+
+/* ---------- connecting lines ----------
+   Every couple gets its own bracket with a dot on it (the marriage); children hang from that dot on a line of
+   their own, so you can always see which two people a child belongs to. Separate families never share a line. */
+function linkShapes(L){const out=[];const N=id=>L.nodes.get(id);const U=(a,b)=>[...S.unions.values()].find(u=>(u.a===a&&u.b===b)||(u.a===b&&u.b===a));
+  const isEx=(a,b)=>{const u=U(a,b);return !!(u&&['divorced','ended'].includes(u.status));};
+  const fams=new Map();
+  for(const n of L.nodes.values()){const ps=parentsOf(n.id).filter(p=>N(p));if(!ps.length)continue;const key=[...ps].sort().join(',');
+    if(!fams.has(key))fams.set(key,{ps,kids:[]});fams.get(key).kids.push(n.id);}
+  const couples=new Map();const ck=(a,b)=>[a,b].sort().join(',');
+  for(const e of L.spouseEdges)if(N(e.a)&&N(e.b))couples.set(ck(e.a,e.b),{a:e.a,b:e.b,ex:!!e.ex});
+  for(const f of fams.values())if(f.ps.length===2&&!couples.has(ck(...f.ps)))couples.set(ck(...f.ps),{a:f.ps[0],b:f.ps[1],ex:isEx(...f.ps)});
+  const J=new Map();const used=new Map();const bump=(ids)=>{const i=Math.max(0,...ids.map(x=>used.get(x)||0));ids.forEach(x=>used.set(x,i+1));return i;};
+  const cl=[...couples.entries()].map(([k,c])=>({k,...c,A:N(c.a),B:N(c.b)}));
+  if(L.horiz){
+    // which side the children are on (right in family views, left in the ancestors view)
+    const sideOf=k=>{const f=fams.get(k);if(!f)return 1;const kx=N(f.kids[0]).x,px=Math.min(...f.ps.map(p=>N(p).x));return kx<px?-1:1;};
+    cl.sort((x,y)=>Math.abs(x.A.y-x.B.y)-Math.abs(y.A.y-y.B.y));
+    for(const c of cl){const[t,u]=c.A.y<=c.B.y?[c.A,c.B]:[c.B,c.A];const sd=sideOf(c.k);const i=bump([t.id,u.id]);
+      const ty=t.y+CH/2,uy=u.y+CH/2;
+      if(sd>0){const bx=Math.max(t.x,u.x)+CW+14+i*10;out.push({d:`M${t.x+CW} ${ty} H${bx} V${uy} H${u.x+CW}`,cls:'couple'+(c.ex?' ex':''),data:{a:c.a,b:c.b}});J.set(c.k,{x:bx,y:(ty+uy)/2,sd});}
+      else{const bx=Math.min(t.x,u.x)-14-i*10;out.push({d:`M${t.x} ${ty} H${bx} V${uy} H${u.x}`,cls:'couple'+(c.ex?' ex':''),data:{a:c.a,b:c.b}});J.set(c.k,{x:bx,y:(ty+uy)/2,sd});}
+      out.push({dot:true,x:J.get(c.k).x,y:J.get(c.k).y,ex:c.ex,data:{a:c.a,b:c.b}});}
+    // each family gets its own lane in the gap between the generations
+    const headX=n=>n.x-(n.inlaw?SPI:0),COL=CW+CG;const far=[];
+    const fl=[...fams.entries()].map(([k,f])=>{let j=J.get(k);
+      if(!j){const pn=N(f.ps[0]);const sd=N(f.kids[0]).x<pn.x?-1:1;j={x:sd>0?pn.x+CW:pn.x,y:pn.y+CH/2,sd};}
+      const px=Math.min(...f.ps.map(p=>headX(N(p))));
+      const near=f.kids.filter(id=>{const n=N(id);return !n.inlaw&&Math.abs(Math.abs(headX(n)-px)-COL)<2;});
+      const away=f.kids.filter(id=>!near.includes(id));if(away.length)far.push({f,j,sd:j.sd,kids:away});
+      if(!near.length)return null;const f2={ps:f.ps,kids:near};
+      const ys=[j.y,...near.map(id=>N(id).y+CH/2)];return{k,f:f2,j,lo:Math.min(...ys),hi:Math.max(...ys)};}).filter(Boolean);
+    const groups=new Map();for(const x of fl){const g=x.j.sd+':'+Math.round(N(x.f.kids[0]).x);if(!groups.has(g))groups.set(g,[]);groups.get(g).push(x);}
+    for(const arr of groups.values()){arr.sort((a,b)=>a.lo-b.lo);const ends=[];const sd=arr[0].j.sd;
+      const kidEdge=sd>0?Math.min(...arr.flatMap(x=>x.f.kids.map(id=>N(id).x))):Math.max(...arr.flatMap(x=>x.f.kids.map(id=>N(id).x+CW)));
+      const start=sd>0?Math.max(...arr.map(x=>x.j.x))+12:Math.min(...arr.map(x=>x.j.x))-12;const room=Math.max(0,Math.abs(kidEdge-start)-14);
+      for(const x of arr){let lane=ends.findIndex(e=>e<x.lo-8);if(lane<0){lane=ends.length;ends.push(0);}ends[lane]=x.hi;x.lane=lane;}
+      const step=Math.min(9,ends.length>1?room/(ends.length-1):9);
+      for(const x of arr){const lx=start+sd*x.lane*step;
+        for(const id of x.f.kids){const n=N(id),ky=n.y+CH/2,kx=sd>0?n.x:n.x+CW;
+          out.push({d:`M${x.j.x} ${x.j.y} H${lx} V${ky} H${kx}`,cls:'kid',data:{k:id,p:x.f.ps.join(',')}});}}}
+    // a child drawn far from their parents (usually someone who married in) gets small tags instead of a line across the tree
+    for(const t of far){const g={parents:t.f.ps,kids:t.kids};
+      for(const id of t.kids){const n=N(id);out.push({tag:true,x:t.sd>0?n.x-6:n.x+CW+6,y:n.y+CH/2,align:t.sd>0?'right':'left',text:t.sd>0?'↖ Parents':'Parents ↗',title:'Parents: '+t.f.ps.map(nameOf).join(' & '),group:g});}
+      out.push({tag:true,x:t.j.x+t.sd*8,y:t.j.y,align:t.sd>0?'left':'right',text:t.kids.length>1?`Children (${t.kids.length}) →`:'Child →',title:(t.kids.length>1?'Children: ':'Child: ')+t.kids.map(nameOf).join(', '),group:g});}
+  }else{
+    for(const c of cl){const[l,r]=c.A.x<=c.B.x?[c.A,c.B]:[c.B,c.A];const y=l.y+CH/2;
+      const between=[...L.nodes.values()].some(n=>n!==l&&n!==r&&Math.abs(n.y-l.y)<CH&&n.x>l.x&&n.x<r.x);
+      if(!between&&Math.abs(l.y-r.y)<1){out.push({d:`M${l.x+CW} ${y} H${r.x}`,cls:'couple'+(c.ex?' ex':''),data:{a:c.a,b:c.b}});J.set(c.k,{x:(l.x+CW+r.x)/2,y});}
+      else{const i=bump([l.id,r.id]);const by=Math.max(l.y,r.y)+CH+8+i*7;out.push({d:`M${l.x+CW/2} ${l.y+CH} V${by} H${r.x+CW/2} V${r.y+CH}`,cls:'couple'+(c.ex?' ex':''),data:{a:c.a,b:c.b}});J.set(c.k,{x:(l.x+r.x+CW)/2,y:by});}
+      out.push({dot:true,x:J.get(c.k).x,y:J.get(c.k).y,ex:c.ex,data:{a:c.a,b:c.b}});}
+    const fl=[...fams.entries()].map(([k,f])=>{let j=J.get(k);if(!j){const pn=N(f.ps[0]);j={x:pn.x+CW/2,y:pn.y+CH};}
+      const xs=[j.x,...f.kids.map(id=>N(id).x+CW/2)];return{f,j,lo:Math.min(...xs),hi:Math.max(...xs),row:Math.round(N(f.kids[0]).y)};});
+    const rows=new Map();for(const x of fl){if(!rows.has(x.row))rows.set(x.row,[]);rows.get(x.row).push(x);}
+    for(const[row,arr]of rows){arr.sort((a,b)=>a.lo-b.lo);const ends=[];
+      for(const x of arr){let lane=ends.findIndex(e=>e<x.lo-8);if(lane<0){lane=ends.length;ends.push(0);}ends[lane]=x.hi;x.lane=lane;}
+      for(const x of arr){const by=row-16-x.lane*8;
+        for(const id of x.f.kids){const n=N(id);out.push({d:`M${x.j.x} ${x.j.y} V${by} H${n.x+CW/2} V${n.y}`,cls:'kid',data:{k:id,p:x.f.ps.join(',')}});}}}
+  }
+  return out;}
 
 /* ---------- render tree ---------- */
 let L=null, AF=null;
 function rel(id){return relation(S.focus,id,AF);}
 function renderTree(scroll){
   const canvas=$('canvas'),svg=$('links');
-  canvas.querySelectorAll('.card,.gen-label').forEach(e=>e.remove());
+  canvas.querySelectorAll('.card,.gen-label,.xlink').forEach(e=>e.remove());
   if(!S.focus||!P(S.focus)){return;}
   AF=ancMap(S.focus);L=S.view==='branch'?layoutBranch(S.focus):S.view==='whole'?layoutWhole(S.focus):S.view==='pedigree'?layoutPedigree(S.focus):layout(S.focus);
   canvas.style.width=L.w+'px';canvas.style.height=L.h+'px';svg.setAttribute('width',L.w);svg.setAttribute('height',L.h);
   svg.replaceChildren();
-  const NS='http://www.w3.org/2000/svg';const pth=(d,cls,data)=>{for(const hit of [false,true]){const e=document.createElementNS(NS,'path');e.setAttribute('d',d);const c=hit?'hit':cls;if(c)e.setAttribute('class',c);if(data)for(const[k,v]of Object.entries(data))e.dataset[k]=v;svg.append(e);}};
-  if(L.horiz){
-    for(const n of L.nodes.values()){const ps=parentsOf(n.id).map(p=>L.nodes.get(p)).filter(Boolean);if(!ps.length)continue;
-      const px=Math.max(...ps.map(q=>q.x))+CW,py=ps.reduce((s,q)=>s+q.y+CH/2,0)/ps.length,ky=n.y+CH/2,mx=n.x-CG/2;
-      pth(`M${px} ${py} H${mx} V${ky} H${n.x}`,'',{k:n.id,p:parentsOf(n.id).join(',')});}
-    for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[t,u]=a.y<b.y?[a,b]:[b,a];
-      pth(`M${t.x+14} ${t.y+CH} V${u.y}`,e.ex?'ex':'',{a:e.a,b:e.b});}
-  }
-  else{
-  for(const e of L.edges){const kn=L.nodes.get(e.kid);const ps=e.parents.map(p=>L.nodes.get(p)).filter(Boolean);if(!kn||!ps.length)continue;
-    const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);
-    const kx=kn.x+CW/2,ky=kn.y,my=ky-30;pth(`M${px} ${py} V${my} H${kx} V${ky}`,'',{k:e.kid,p:e.parents.join(',')});}
-  for(const e of L.spouseEdges){const a=L.nodes.get(e.a),b=L.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];const y=l.y+CH/2;
-    pth(`M${l.x+CW} ${y} H${r.x}`,e.ex?'ex':'',{a:e.a,b:e.b});}
-  }
+  const NS='http://www.w3.org/2000/svg';const dots=[],tags=[];const pth=(d,cls,data)=>{for(const hit of [false,true]){const e=document.createElementNS(NS,'path');e.setAttribute('d',d);const c=hit?'hit':cls;if(c)e.setAttribute('class',c);if(data)for(const[k,v]of Object.entries(data))e.dataset[k]=v;svg.append(e);}};
+  for(const sh of linkShapes(L)){
+    if(sh.dot){const c=document.createElementNS(NS,'circle');c.setAttribute('cx',sh.x);c.setAttribute('cy',sh.y);c.setAttribute('r',5);c.setAttribute('class','udot'+(sh.ex?' ex':''));for(const[k,v]of Object.entries(sh.data))c.dataset[k]=v;dots.push(c);}
+    else if(sh.tag){const b=h('button',{class:'xlink '+sh.align,style:`left:${sh.x}px;top:${sh.y}px`,title:sh.title,'aria-label':sh.title,text:sh.text,
+        onclick:e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();ex().openGroup(sh.group,r.left+r.width/2,r.bottom);}});tags.push(b);}
+    else pth(sh.d,sh.cls,sh.data);}
+  dots.forEach(c=>svg.append(c));
   // generation labels
   const gname=k=>k===0?'Generation of '+firstName(S.focus):k<0?(['Parents','Grandparents','Great-grandparents','2× great-grandparents','3× great-grandparents','4× great-grandparents'][-k-1]||''):(['Children','Grandchildren','Great-grandchildren'][k-1]||'');
   if(L.horiz){
@@ -318,6 +375,7 @@ function renderTree(scroll){
       'data-id':n.id,'aria-label':p.name+', '+r.l,onclick:()=>{if(S.sel===n.id&&n.id!==S.focus)setFocus(n.id);else select(n.id);}},
       av,h('div',{class:'tx'},h('div',{class:'rel',text:r.l}),h('div',{class:'nm',text:cardName(p)}),p.aka?h('div',{class:'aka',text:'aka '+p.aka}):null,...cardDates(p).map(t=>h('div',{class:'dt',text:t}))));
     canvas.append(card);}
+  tags.forEach(b=>canvas.append(b));
   applyScale();highlightPath();ex().rendered();
   $('centered').replaceChildren('Centered on ',h('b',{text:P(S.focus).name}),' · click a person, then click again to re-center');
   if(scroll)centerOnFocus();
@@ -328,7 +386,7 @@ let EX=null;
 function ex(){return EX||(EX=makeExplore({stage:$('stage'),canvas:$('canvas'),svg:$('links'),getL:()=>L,getScale:()=>S.scale,CW,CH,name:id=>nameOf(id),label:id=>AF?rel(id).l:'',go:goTo}));}
 function goTo(id){if(!L)return;const n=L.nodes.get(id);if(!n)return;const st=$('stage');
   st.scrollTo({left:(n.x+CW/2)*S.scale-st.clientWidth/2,top:(n.y+CH/2)*S.scale-st.clientHeight/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
-  select(id);const c=document.querySelector('#canvas .card[data-id="'+CSS.escape(id)+'"]');if(c){c.classList.remove('flash');void c.offsetWidth;c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),1800);}}
+  select(id,innerWidth<=820);const c=document.querySelector('#canvas .card[data-id="'+CSS.escape(id)+'"]');if(c){c.classList.remove('flash');void c.offsetWidth;c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),1800);}}
 function centerOnFocus(){if(!L)return;const n=L.nodes.get(S.focus);const st=$('stage');
   st.scrollLeft=(n.x+CW/2)*S.scale-st.clientWidth/2;st.scrollTop=(n.y+CH/2)*S.scale-st.clientHeight*0.55;}
 
@@ -339,7 +397,7 @@ function wrap2(s,max){if(s.length<=max)return[s];const w=s.split(' ');let a='';w
   let b=w.join(' ');if(b.length>max)b=b.slice(0,max-1)+'…';return a?[a,b]:[s.slice(0,max-1)+'…'];}
 export function printTree(mode,size,famName,paper,opts){const big=paper==='tabloid';
   const save=[CW,CH,GX,RH,CG,RG,SPI];
-  CW=172;CH=74;GX=10;RH=112;CG=44;RG=8;SPI=16;
+  CW=172;CH=74;GX=10;RH=112;CG=96;RG=8;SPI=16;
   const F=S.focus;let PL,title;
   try{
     if(mode==='everyone'){PL=layoutWhole(F);title='Everyone in the family';}
@@ -350,15 +408,8 @@ export function printTree(mode,size,famName,paper,opts){const big=paper==='tablo
   }catch(e){[CW,CH,GX,RH,CG,RG,SPI]=save;throw e;}
   const W=PL.w,H=PL.h;let out=[];
   const line=(d,ex)=>out.push(`<path d="${d}" fill="none" stroke="#C9B48F" stroke-width="1.2"${ex?' stroke-dasharray="4 3"':''}/>`);
-  if(PL.horiz){
-    for(const n of PL.nodes.values()){const ps=parentsOf(n.id).map(p=>PL.nodes.get(p)).filter(Boolean);if(!ps.length)continue;
-      const px=Math.max(...ps.map(q=>q.x))+CW,py=ps.reduce((s,q)=>s+q.y+CH/2,0)/ps.length,ky=n.y+CH/2,mx=n.x-CG/2;line(`M${px} ${py} H${mx} V${ky} H${n.x}`);}
-    for(const e of PL.spouseEdges){const a=PL.nodes.get(e.a),b=PL.nodes.get(e.b);if(!a||!b)continue;const[t,u]=a.y<b.y?[a,b]:[b,a];line(`M${t.x+8} ${t.y+CH} V${u.y}`,e.ex);}
-  }else{
-    for(const e of PL.edges){const kn=PL.nodes.get(e.kid);const ps=e.parents.map(p=>PL.nodes.get(p)).filter(Boolean);if(!kn||!ps.length)continue;
-      const px=ps.reduce((s,n)=>s+n.x+CW/2,0)/ps.length,py=Math.max(...ps.map(n=>n.y))+(ps.length>1?CH/2:CH);const kx=kn.x+CW/2,ky=kn.y;line(`M${px} ${py} V${ky-24} H${kx} V${ky}`);}
-    for(const e of PL.spouseEdges){const a=PL.nodes.get(e.a),b=PL.nodes.get(e.b);if(!a||!b)continue;const[l,r]=a.x<b.x?[a,b]:[b,a];line(`M${l.x+CW} ${l.y+CH/2} H${r.x}`,e.ex);}
-  }
+  const dotsP=[];for(const sh of linkShapes(PL)){if(sh.tag){dotsP.push(`<text x="${sh.x}" y="${sh.y+3}" font-size="7.5" font-style="italic" fill="#86602F" text-anchor="${sh.align==='right'?'end':'start'}">${escX(sh.title)}</text>`);continue;}if(sh.dot)dotsP.push(`<circle cx="${sh.x}" cy="${sh.y}" r="3.5" fill="${sh.ex?'#FFFFFF':'#86602F'}" stroke="#86602F" stroke-width="1"/>`);else line(sh.d,(sh.cls||'').includes('ex'));}
+  out.push(...dotsP);
   const CLp=S.colorBy==='none'?null:classify(F);const LC=['#86602F','#3D6A8C','#4E7D52','#A65A3A','#7B5C93'];
   for(const n of PL.nodes.values()){const p=P(n.id);const r=relation(F,n.id,ancMap(F));const ci=CLp?.map.get(n.id);
     const stripe=!ci||ci.kind==='married'||ci.kind==='self'?null:S.colorBy==='line'?LC[ci.line]||null:(ci.kind==='direct'?'#86602F':'#D9C6A8');
@@ -443,7 +494,12 @@ function renderLegend(slot){const el=$('legend');if(!el)return;
   let rows=[];
   if(S.colorBy==='relation')rows=[item('sw-direct','Immediate family and direct line: parents, grandparents, brothers, sisters, children'),item('sw-blood','Other blood relatives: aunts, uncles, cousins, nieces, nephews'),item('sw-married','Married into the family')];
   else if(S.colorBy==='line'){rows=[item('sw-l0',firstName(S.focus)+'’s own family'),...slot.map(([g,n])=>item('sw-l'+n,lineName(g)+' line')),item('sw-married','Married in (outline shows whose family)')];}
-  el.replaceChildren(sel,...rows);el.hidden=false;}
+  const lines=h('div',{class:'lg-i lg-lines'},h('span',{class:'lg-dot'}),'Couple: the dot joins two partners; lines from the dot lead to their children. Dashed with an open dot means divorced or separated.');
+  const tagRow=h('div',{class:'lg-i'},h('span',{class:'lg-tag',text:'↖ Parents'}),'Their parents are elsewhere in the tree. Tap to go there.');
+  let open;try{open=localStorage.getItem('gft-key');}catch(e){}open=open===null||open===undefined?innerWidth>820:open==='1';
+  const body=h('div',{class:'lg-body',hidden:!open},...rows,lines,tagRow);
+  const tog=h('button',{class:'lg-tog','aria-expanded':String(open),text:open?'Hide key':'Key',onclick:()=>{const o=body.hidden;body.hidden=!o;tog.textContent=o?'Hide key':'Key';tog.setAttribute('aria-expanded',String(o));try{localStorage.setItem('gft-key',o?'1':'0');}catch(e){}}});
+  el.replaceChildren(h('div',{class:'lg-top'},sel,tog),body);el.hidden=false;}
 
 /* ---------- trace the line between two people ---------- */
 function pathBetween(a,b){if(!a||!b||a===b)return[];const prev=new Map([[a,null]]);const q=[a];
@@ -463,7 +519,7 @@ function highlightPath(){const svg=$('links');if(!svg)return;
 /* ---------- focus & selection ---------- */
 function setFocus(id,fromHash){if(!P(id))return;S.focus=id;S.sel=id;if(!fromHash&&location.hash!=='#'+id){try{location.hash=id;}catch(e){}}
   S.editing=null;renderTree(true);renderPanel();openSheet();}
-function select(id){S.sel=id;S.editing=null;S.tab='person';document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.id===id));highlightPath();ex().refreshMarks();renderPanel();openSheet();}
+function select(id,quiet){S.sel=id;S.editing=null;S.tab='person';document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.id===id));highlightPath();ex().refreshMarks();renderPanel();if(!quiet)openSheet();}
 function openSheet(){$('aside').classList.remove('closed');}
 window.addEventListener('hashchange',()=>{const id=decodeURIComponent(location.hash.slice(1));if(id&&id!==S.focus&&P(id))setFocus(id,true);});
 

@@ -43,7 +43,7 @@ export function makeExplore(o){
     for(const root of [o.canvas,clone].filter(Boolean)){
       root.querySelectorAll('.'+cls).forEach(e=>e.classList.remove(cls));
       if(!g)continue;const ids=new Set([...g.parents,...g.kids]);
-      root.querySelectorAll('svg path:not(.hit)').forEach(e=>{if(g.person?personLine(e.dataset,g.person):pathInGroup(e.dataset,g))e.classList.add(cls);});
+      root.querySelectorAll('svg path:not(.hit),svg circle').forEach(e=>{if(g.person?personLine(e.dataset,g.person):pathInGroup(e.dataset,g))e.classList.add(cls);});
       root.querySelectorAll('.card').forEach(c=>{if(ids.has(c.dataset.id))c.classList.add(cls+'-on');else c.classList.remove(cls+'-on');});}
     drawMap();}
   const personLine=(d,id)=>d.k===id||(d.k&&(d.p||'').split(',').includes(id))||d.a===id||d.b===id;
@@ -150,6 +150,7 @@ export function makeExplore(o){
   if(window.ResizeObserver)new ResizeObserver(()=>layoutMap()).observe(o.stage);
 
   return {
+    openGroup(g,x,y){openPop({couple:false,...g},x,y);},
     rendered(){clone=null;lensIn.replaceChildren();closePop();tip.hidden=true;lens.hidden=true;layoutMap();},
     rescaled(){lens.hidden=true;layoutMap();},
     refreshMarks(){if(clone){clone=null;lensIn.replaceChildren();}drawMap();}
